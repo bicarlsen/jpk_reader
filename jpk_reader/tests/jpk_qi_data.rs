@@ -4,7 +4,6 @@ use std::{fs, path::PathBuf};
 const DATA_DIR: &str = "tests/data/qi_data";
 const DATA_FILE: &str = "qi_data.jpk-qi-data";
 
-#[tracing_test::traced_test]
 #[test]
 fn qi_map() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -31,7 +30,6 @@ fn qi_map() {
     let idx = qi_map::DataIndex::new(0, 0, "measuredHeight");
     let values = result.get(&idx).unwrap();
     assert_eq!(*values, m_height);
-
     let idx = qi_map::DataIndex::new(0, 0, "smoothedMeasuredHeight");
     let values = result.get(&idx).unwrap();
     assert_eq!(*values, sm_height);
