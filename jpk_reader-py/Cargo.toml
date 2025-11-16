@@ -18,5 +18,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 jpk_reader = { workspace = true }
-pyo3 = "0.27.0"
+# pyo3 = "0.27.0"
 arrow = { version = "57.0", default-features = false, features = ["pyarrow"] }
+pyo3 = { version = "0.26.0", features = ["extension-module"] }

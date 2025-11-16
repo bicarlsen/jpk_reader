@@ -1,7 +1,7 @@
 use jpk_reader::qi_map::{self, QIMapReader};
 use std::{fs, path::PathBuf};
 
-const DATA_DIR: &str = "tests/data/qi_data";
+const DATA_DIR: &str = "../data/qi_data";
 const DATA_FILE: &str = "qi_data.jpk-qi-data";
 
 #[test]
