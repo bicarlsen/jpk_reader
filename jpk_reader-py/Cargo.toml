@@ -1,0 +1,22 @@
+[package]
+name = "jpk_reader-py"
+version = "0.0.1"
+edition = "2024"
+
+authors = ["Brian Carlsen <carlsen.bri@gmail.com>"]
+description = "Python bindings for JPK data."
+license = "GNU GPLv3"
+
+repository = "https://github.com/bicarlsen/jpk_reader"
+keywords = ["afm", "atomic force microscopy", "jpk", "bruker"]
+categories = ["science"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "jpk_reader_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+jpk_reader = { workspace = true }
+pyo3 = "0.27.0"
+arrow = { version = "57.0", default-features = false, features = ["pyarrow"] }
