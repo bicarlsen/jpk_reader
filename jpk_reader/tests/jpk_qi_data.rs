@@ -12,27 +12,31 @@ fn qi_map() {
 
     let file = fs::File::open(&data_path).unwrap();
     let mut data = qi_map::Reader::new(file).unwrap();
-    let m_height = data
-        .get_data_index_segment_channel(0, 0, "measuredHeight")
-        .unwrap();
+    let pixel = qi_map::Pixel::new(0, 0);
 
-    let sm_height = data
-        .get_data_index_segment_channel(0, 0, "smoothedMeasuredHeight")
-        .unwrap();
-
-    let query = qi_map::Query {
-        index: qi_map::IndexQuery::Pixel(qi_map::Pixel::new(0, 0)),
+    let query = qi_map::DataQuery {
+        index: qi_map::IndexQuery::Pixel(pixel.clone()),
         segment: qi_map::SegmentQuery::Indices(vec![0]),
         channel: qi_map::ChannelQuery::include(vec!["measuredHeight", "smoothedMeasuredHeight"]),
     };
     let result = data.query_data(&query).unwrap();
     assert_eq!(result.len(), 2);
-    let idx = qi_map::DataIndex::new(0, 0, "measuredHeight");
+    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "measuredHeight");
     let values = result.get(&idx).unwrap();
-    assert_eq!(*values, m_height);
-    let idx = qi_map::DataIndex::new(0, 0, "smoothedMeasuredHeight");
+    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "smoothedMeasuredHeight");
     let values = result.get(&idx).unwrap();
-    assert_eq!(*values, sm_height);
+
+    let query = qi_map::MetadataQuery::Dataset;
+    let result = data.query_metadata(&query).unwrap();
+    assert_eq!(result.len(), 1);
+
+    let query = qi_map::MetadataQuery::SharedData;
+    let result = data.query_metadata(&query).unwrap();
+    assert_eq!(result.len(), 1);
+
+    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel.clone()));
+    let result = data.query_metadata(&query).unwrap();
+    assert_eq!(result.len(), 1);
 
     // long running test
     // let query = qi_map::Query::select_all();

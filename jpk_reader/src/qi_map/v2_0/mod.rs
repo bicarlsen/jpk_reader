@@ -41,7 +41,7 @@ impl SegmentProperties {
 }
 
 #[derive(derive_more::Deref)]
-struct SharedData {
+pub struct SharedData {
     inner: Properties,
 }
 
@@ -238,28 +238,27 @@ where
     }
 }
 
-impl<R> super::QIMapReader for Reader<R>
+impl<R> Reader<R>
 where
     R: io::Read + io::Seek,
 {
-    type Error = Error;
-    fn get_data_index_segment_channel(
+    pub fn get_data_index_segment_channel(
         &mut self,
         index: IndexId,
         segment: SegmentId,
         channel: impl fmt::Display,
-    ) -> Result<Vec<Value>, Self::Error> {
+    ) -> Result<Vec<Value>, DataError> {
         let segment_properties_path = utils::index_segment_properties_path(index, segment);
         let segment_properties = {
             let mut segment_properties =
                 self.archive
                     .by_path(&segment_properties_path)
-                    .map_err(|error| Error::Zip {
+                    .map_err(|error| DataError::Zip {
                         path: segment_properties_path.clone(),
                         error,
                     })?;
             let segment_properties =
-                Properties::new(&mut segment_properties).map_err(|_| Error::InvalidFormat {
+                Properties::new(&mut segment_properties).map_err(|_| DataError::InvalidFormat {
                     path: segment_properties_path.clone(),
                     cause: "file could not be read as properties".to_string(),
                 })?;
@@ -270,11 +269,11 @@ where
 
         let channel_data = channel_data::ChannelData::from(&segment_properties, &channel).map_err(
             |err| match err {
-                PropertyError::NotFound(key) => Error::InvalidFormat {
+                PropertyError::NotFound(key) => DataError::InvalidFormat {
                     path: segment_properties_path.clone(),
                     cause: format!("property `{key}` not found"),
                 },
-                PropertyError::InvalidValue(key) => Error::InvalidFormat {
+                PropertyError::InvalidValue(key) => DataError::InvalidFormat {
                     path: segment_properties_path.clone(),
                     cause: format!("invalid value of `{key}`"),
                 },
@@ -292,122 +291,48 @@ where
             PathBuf::from(path)
         };
 
-        let mut data_file = self
-            .archive
-            .by_path(&data_file_path)
-            .map_err(|error| Error::Zip {
-                path: data_file_path.clone(),
-                error,
-            })?;
+        let mut data_file =
+            self.archive
+                .by_path(&data_file_path)
+                .map_err(|error| DataError::Zip {
+                    path: data_file_path.clone(),
+                    error,
+                })?;
         let mut data = Vec::with_capacity(data_file.size() as usize);
-        data_file.read_to_end(&mut data).map_err(|err| Error::Zip {
-            path: data_file_path.clone(),
-            error: zip::result::ZipError::Io(err),
-        })?;
+        data_file
+            .read_to_end(&mut data)
+            .map_err(|err| DataError::Zip {
+                path: data_file_path.clone(),
+                error: zip::result::ZipError::Io(err),
+            })?;
 
         let data = lcd_info
             .convert_data(&data)
-            .map_err(|_err| Error::InvalidData {
+            .map_err(|_err| DataError::InvalidData {
                 path: data_file_path.clone(),
             })?;
 
         Ok(data)
     }
+}
 
-    fn query_data(&mut self, query: &super::Query) -> Result<super::Data, super::QueryError> {
-        let indices = match &query.index {
-            super::IndexQuery::All => match self.dataset_info.index {
-                Index::Range { min, max } => (min..=max).collect::<Vec<_>>(),
-            },
-
-            super::IndexQuery::PixelRect(rect) => rect
-                .iter()
-                .map(|pixel| {
-                    self.dataset_info
-                        .position_pattern
-                        .pixel_to_index(&pixel)
-                        .ok_or(super::QueryError::OutOfBounds(pixel))
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-
-            super::IndexQuery::Pixel(pixel) => {
-                let idx = self
-                    .dataset_info
-                    .position_pattern
-                    .pixel_to_index(pixel)
-                    .ok_or(super::QueryError::OutOfBounds(pixel.clone()))?;
-                vec![idx]
-            }
-        };
-
+impl<R> super::QIMapReader for Reader<R>
+where
+    R: io::Read + io::Seek,
+{
+    fn query_data(&mut self, query: &super::DataQuery) -> Result<super::Data, super::QueryError> {
+        let indices = self._data_query_indices(query)?;
         let mut data_idx = Vec::with_capacity(indices.len());
         for idx in indices {
-            let index_properties_path = utils::index_properties_path(idx);
-            let index_data = {
-                let mut file = self
-                    .archive
-                    .by_path(&index_properties_path)
-                    .map_err(|error| super::QueryError::Zip {
-                        path: index_properties_path.clone(),
-                        error,
-                    })?;
-                let properties = properties::Properties::new(&mut file).map_err(|_err| {
-                    super::QueryError::InvalidFormat {
-                        path: index_properties_path.clone(),
-                        cause: "invalid property file".to_string(),
-                    }
-                })?;
-
-                index_data::IndexData::from_properties(&properties).map_err(|err| match err {
-                    PropertyError::NotFound(key) => super::QueryError::InvalidFormat {
-                        path: index_properties_path.clone(),
-                        cause: format!("property `{key}` not found"),
-                    },
-                    PropertyError::InvalidValue(key) => super::QueryError::InvalidFormat {
-                        path: index_properties_path.clone(),
-                        cause: format!("invalid value for `{key}`"),
-                    },
-                })?
-            };
-
+            let index_data = self._index_data(idx)?;
             let segments = match &query.segment {
                 super::SegmentQuery::All => (0..index_data.segment_count()).collect::<Vec<_>>(),
                 super::SegmentQuery::Indices(indices) => indices.clone(),
             };
 
             for segment in segments {
-                let segment_properties_path = utils::index_segment_properties_path(idx, segment);
-                let segment_properties = {
-                    let mut properties =
-                        self.archive
-                            .by_path(&segment_properties_path)
-                            .map_err(|error| super::QueryError::Zip {
-                                path: segment_properties_path.clone(),
-                                error,
-                            })?;
-                    let properties = Properties::new(&mut properties).map_err(|_| {
-                        super::QueryError::InvalidFormat {
-                            path: segment_properties_path.clone(),
-                            cause: "file could not be read as properties".to_string(),
-                        }
-                    })?;
-
-                    SegmentProperties { inner: properties }
-                };
-
-                let segment_data = segment_data::SegmentData::from(&segment_properties).map_err(
-                    |err| match err {
-                        PropertyError::NotFound(key) => super::QueryError::InvalidFormat {
-                            path: index_properties_path.clone(),
-                            cause: format!("property `{key}` not found"),
-                        },
-                        PropertyError::InvalidValue(key) => super::QueryError::InvalidFormat {
-                            path: index_properties_path.clone(),
-                            cause: format!("invalid value for `{key}`"),
-                        },
-                    },
-                )?;
-
+                let segment_properties = self._segment_properties(idx, segment)?;
+                let segment_data = self._segment_data(&segment_properties, idx)?;
                 let channels = match &query.channel {
                     super::ChannelQuery::All => segment_data.channels().clone(),
                     super::ChannelQuery::Include(channels) => {
@@ -418,27 +343,20 @@ where
                 };
 
                 for channel in channels {
-                    let channel_data = channel_data::ChannelData::from(
-                        &segment_properties,
-                        &channel,
-                    )
-                    .map_err(|err| match err {
-                        PropertyError::NotFound(key) => super::QueryError::InvalidFormat {
-                            path: segment_properties_path.clone(),
-                            cause: format!("property `{key}` not found"),
-                        },
-                        PropertyError::InvalidValue(key) => super::QueryError::InvalidFormat {
-                            path: segment_properties_path.clone(),
-                            cause: format!("invalid value of `{key}`"),
-                        },
-                    })?;
-
+                    let channel_data =
+                        self._channel_data(&segment_properties, &channel, idx, segment)?;
+                    let pixel = self
+                        .dataset_info
+                        .position_pattern
+                        .index_to_pixel(idx)
+                        .expect("pixel to be valid");
                     data_idx.push((
                         super::DataIndex {
-                            index: idx,
+                            pixel,
                             segment,
                             channel,
                         },
+                        idx,
                         channel_data.shared_data_index(),
                         channel_data.file_path().clone(),
                     ))
@@ -447,11 +365,10 @@ where
         }
 
         let mut data = Vec::with_capacity(data_idx.len());
-        for (idx, shared_data_index, file_path) in data_idx {
+        for (idx, index, shared_data_index, file_path) in data_idx {
             let lcd_info = &self.lcd_info[shared_data_index];
-
             let data_file_path = {
-                let path = utils::index_segment_path(idx.index, idx.segment);
+                let path = utils::index_segment_path(index, idx.segment);
                 let path = format!("{}/{}", path.to_string_lossy(), file_path.to_string_lossy());
                 PathBuf::from(path)
             };
@@ -483,6 +400,211 @@ where
         let (idx, data) = data.into_iter().unzip();
         let data = super::Data::new(idx, data).unwrap();
         Ok(data)
+    }
+
+    fn query_metadata(
+        &mut self,
+        query: &super::MetadataQuery,
+    ) -> Result<super::Metadata, super::QueryError> {
+        match query {
+            super::MetadataQuery::Dataset => {
+                let mut properties = self
+                    .archive
+                    .by_path(utils::DATASET_PROPERTIES_FILE)
+                    .map_err(|error| super::QueryError::Zip {
+                        path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
+                        error,
+                    })?;
+
+                let properties = Properties::new(&mut properties).map_err(|_| {
+                    super::QueryError::InvalidFormat {
+                        path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
+                        cause: "file could not be read as properties".to_string(),
+                    }
+                })?;
+
+                let idx = vec![super::MetadataIndex::Dataset];
+                let data = vec![properties];
+                Ok(super::Metadata::new(idx, data).unwrap())
+            }
+
+            super::MetadataQuery::SharedData => {
+                let data_path = utils::shared_data_properties_path();
+                let mut properties =
+                    self.archive
+                        .by_path(&data_path)
+                        .map_err(|error| super::QueryError::Zip {
+                            path: data_path.clone(),
+                            error,
+                        })?;
+
+                let properties = Properties::new(&mut properties).map_err(|_| {
+                    super::QueryError::InvalidFormat {
+                        path: data_path.clone(),
+                        cause: "file could not be read as properties".to_string(),
+                    }
+                })?;
+
+                let idx = vec![super::MetadataIndex::SharedData];
+                let data = vec![properties];
+                Ok(super::Metadata::new(idx, data).unwrap())
+            }
+
+            super::MetadataQuery::Index(query) => match query {
+                super::IndexQuery::All => todo!(),
+                super::IndexQuery::PixelRect(rect) => todo!(),
+                super::IndexQuery::Pixel(pixel) => {
+                    let Some(index) = self.dataset_info.position_pattern.pixel_to_index(pixel)
+                    else {
+                        return Err(super::QueryError::OutOfBounds(pixel.clone()));
+                    };
+                    let data_path = utils::index_properties_path(index);
+                    let mut properties = self.archive.by_path(&data_path).map_err(|error| {
+                        super::QueryError::Zip {
+                            path: data_path.clone(),
+                            error,
+                        }
+                    })?;
+                    let properties = Properties::new(&mut properties).map_err(|_| {
+                        super::QueryError::InvalidFormat {
+                            path: data_path.clone(),
+                            cause: "file could not be read as properties".to_string(),
+                        }
+                    })?;
+
+                    let idx = vec![super::MetadataIndex::Pixel(pixel.clone())];
+                    let data = vec![properties];
+                    Ok(super::Metadata::new(idx, data).unwrap())
+                }
+            },
+            super::MetadataQuery::Segment { index, segment } => todo!(),
+            super::MetadataQuery::All => todo!(),
+        }
+    }
+}
+
+impl<R> Reader<R>
+where
+    R: io::Read + io::Seek,
+{
+    fn _data_query_indices(
+        &mut self,
+        query: &super::DataQuery,
+    ) -> Result<Vec<IndexId>, super::QueryError> {
+        match &query.index {
+            super::IndexQuery::All => match self.dataset_info.index {
+                Index::Range { min, max } => Ok((min..=max).collect::<Vec<_>>()),
+            },
+
+            super::IndexQuery::PixelRect(rect) => rect
+                .iter()
+                .map(|pixel| {
+                    self.dataset_info
+                        .position_pattern
+                        .pixel_to_index(&pixel)
+                        .ok_or(super::QueryError::OutOfBounds(pixel))
+                })
+                .collect::<Result<Vec<_>, _>>(),
+
+            super::IndexQuery::Pixel(pixel) => {
+                let idx = self
+                    .dataset_info
+                    .position_pattern
+                    .pixel_to_index(pixel)
+                    .ok_or(super::QueryError::OutOfBounds(pixel.clone()))?;
+                Ok(vec![idx])
+            }
+        }
+    }
+
+    fn _index_data(&mut self, index: IndexId) -> Result<index_data::IndexData, super::QueryError> {
+        let index_properties_path = utils::index_properties_path(index);
+        let mut file = self
+            .archive
+            .by_path(&index_properties_path)
+            .map_err(|error| super::QueryError::Zip {
+                path: index_properties_path.clone(),
+                error,
+            })?;
+        let properties = properties::Properties::new(&mut file).map_err(|_err| {
+            super::QueryError::InvalidFormat {
+                path: index_properties_path.clone(),
+                cause: "invalid property file".to_string(),
+            }
+        })?;
+
+        index_data::IndexData::from_properties(&properties).map_err(|err| match err {
+            PropertyError::NotFound(key) => super::QueryError::InvalidFormat {
+                path: index_properties_path.clone(),
+                cause: format!("property `{key}` not found"),
+            },
+            PropertyError::InvalidValue(key) => super::QueryError::InvalidFormat {
+                path: index_properties_path.clone(),
+                cause: format!("invalid value for `{key}`"),
+            },
+        })
+    }
+
+    fn _segment_properties(
+        &mut self,
+        index: IndexId,
+        segment: SegmentId,
+    ) -> Result<SegmentProperties, super::QueryError> {
+        let segment_properties_path = utils::index_segment_properties_path(index, segment);
+        let mut properties = self
+            .archive
+            .by_path(&segment_properties_path)
+            .map_err(|error| super::QueryError::Zip {
+                path: segment_properties_path.clone(),
+                error,
+            })?;
+        let properties =
+            Properties::new(&mut properties).map_err(|_| super::QueryError::InvalidFormat {
+                path: segment_properties_path.clone(),
+                cause: "file could not be read as properties".to_string(),
+            })?;
+
+        Ok(SegmentProperties { inner: properties })
+    }
+
+    /// # Notes
+    /// + `index` only used for error reporting.
+    fn _segment_data(
+        &mut self,
+        properties: &SegmentProperties,
+        index: IndexId,
+    ) -> Result<segment_data::SegmentData, super::QueryError> {
+        segment_data::SegmentData::from(properties).map_err(|err| match err {
+            PropertyError::NotFound(key) => super::QueryError::InvalidFormat {
+                path: utils::index_properties_path(index),
+                cause: format!("property `{key}` not found"),
+            },
+            PropertyError::InvalidValue(key) => super::QueryError::InvalidFormat {
+                path: utils::index_properties_path(index),
+                cause: format!("invalid value for `{key}`"),
+            },
+        })
+    }
+
+    /// # Notes
+    /// + `index` and `segment` only used for error reporting.
+    fn _channel_data(
+        &self,
+        segment_properties: &SegmentProperties,
+        channel: impl fmt::Display,
+        index: IndexId,
+        segment: SegmentId,
+    ) -> Result<channel_data::ChannelData, super::QueryError> {
+        channel_data::ChannelData::from(segment_properties, &channel).map_err(|err| match err {
+            PropertyError::NotFound(key) => super::QueryError::InvalidFormat {
+                path: utils::index_segment_properties_path(index, segment),
+                cause: format!("property `{key}` not found"),
+            },
+            PropertyError::InvalidValue(key) => super::QueryError::InvalidFormat {
+                path: utils::index_segment_properties_path(index, segment),
+                cause: format!("invalid value of `{key}`"),
+            },
+        })
     }
 }
 
@@ -529,11 +651,26 @@ impl PositionPattern {
     pub fn pixel_to_index(&self, pixel: &super::Pixel) -> Option<IndexId> {
         match &self.kind {
             PositionPatternType::Grid(grid) => {
-                if pixel.x >= grid.i_length as usize || pixel.y >= grid.j_length as usize {
+                if pixel.i >= grid.i_length as usize || pixel.j >= grid.j_length as usize {
                     return None;
                 }
 
-                Some(pixel.y * grid.i_length as usize + pixel.x)
+                Some(pixel.j * grid.i_length as usize + pixel.i)
+            }
+        }
+    }
+
+    /// # Returns
+    /// `None` if index is invalid.
+    pub fn index_to_pixel(&self, index: IndexId) -> Option<super::Pixel> {
+        match &self.kind {
+            PositionPatternType::Grid(grid) => {
+                let y = index / grid.i_length as usize;
+                if y >= grid.j_length as usize {
+                    return None;
+                }
+                let x = index % grid.i_length as usize;
+                return Some(super::Pixel { i: x, j: y });
             }
         }
     }
@@ -639,7 +776,7 @@ impl DataFileFormat {
 }
 
 #[derive(Debug)]
-pub enum Error {
+pub enum DataError {
     Zip {
         path: PathBuf,
         error: zip::result::ZipError,

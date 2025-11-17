@@ -1,11 +1,12 @@
 use super::Value;
 use crate::properties::{self, PropertyError};
+use std::sync::Arc;
 
 pub struct LcdInfo {
     data_type: DataType,
     channel_info: ChannelInfo,
     unit: String,
-    decoder: Box<dyn decoder::Decode>,
+    decoder: Arc<dyn decoder::Decode + Sync + Send>,
     conversion_set: conversion::ConversionSet,
 }
 
@@ -31,7 +32,7 @@ impl LcdInfo {
             properties::extract_value!(properties, Self::data_type_key(index), from_str DataType)?;
         let decoder = match data_type {
             DataType::Integer => decoder::int_from_properties(&properties, index)?,
-            DataType::Float => Box::new(decoder::RawFloatDecoder),
+            DataType::Float => Arc::new(decoder::RawFloatDecoder),
         };
 
         let channel_info = ChannelInfo::from_properties(properties, index)?;
@@ -213,9 +214,9 @@ pub mod scale {
 pub mod decoder {
     use super::{super::SharedData, Value, scale::Scale};
     use crate::properties;
-    use std::mem;
+    use std::{mem, sync::Arc};
 
-    pub type RawData = Vec<u8>;
+    pub type RawData = [u8];
 
     pub trait Decode {
         fn decode(&self, data: &RawData) -> Result<Vec<Value>, InvalidDataLength>;
@@ -268,12 +269,12 @@ pub mod decoder {
     }
 
     pub struct IntDecoder<T> {
-        scale: Box<dyn Scale<T>>,
+        scale: Box<dyn Scale<T> + Sync + Send>,
         unit: String,
     }
 
     impl<T> IntDecoder<T> {
-        pub fn new(scale: Box<dyn Scale<T>>, unit: String) -> Self {
+        pub fn new(scale: Box<dyn Scale<T> + Sync + Send>, unit: String) -> Self {
             Self { scale, unit }
         }
 
@@ -286,7 +287,7 @@ pub mod decoder {
     pub fn int_from_properties(
         properties: &SharedData,
         idx: usize,
-    ) -> Result<Box<dyn Decode>, super::PropertyError> {
+    ) -> Result<Arc<dyn Decode + Sync + Send>, super::PropertyError> {
         use super::scale::{Style, Type};
 
         let data_type = properties::extract_value!(properties, SharedData::lcd_info_encoder_type_key(idx), from_str DataType)?;
@@ -304,11 +305,11 @@ pub mod decoder {
         let scale = Box::new(scale);
 
         match data_type {
-            DataType::I16 => Ok(Box::new(IntDecoder::<i16>::new(scale, unit))),
-            DataType::U16 => Ok(Box::new(IntDecoder::<u16>::new(scale, unit))),
-            DataType::I32 => Ok(Box::new(IntDecoder::<i32>::new(scale, unit))),
-            DataType::U32 => Ok(Box::new(IntDecoder::<u32>::new(scale, unit))),
-            DataType::I64 => Ok(Box::new(IntDecoder::<i64>::new(scale, unit))),
+            DataType::I16 => Ok(Arc::new(IntDecoder::<i16>::new(scale, unit))),
+            DataType::U16 => Ok(Arc::new(IntDecoder::<u16>::new(scale, unit))),
+            DataType::I32 => Ok(Arc::new(IntDecoder::<i32>::new(scale, unit))),
+            DataType::U32 => Ok(Arc::new(IntDecoder::<u32>::new(scale, unit))),
+            DataType::I64 => Ok(Arc::new(IntDecoder::<i64>::new(scale, unit))),
         }
     }
 
@@ -485,7 +486,7 @@ mod conversion {
         name: String,
         base_slot: String,
         calibration_slot: String,
-        scale: Box<dyn scale::Scale<Value>>,
+        scale: Box<dyn scale::Scale<Value> + Sync + Send>,
     }
 
     impl Conversion {
