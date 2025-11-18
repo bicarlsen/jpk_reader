@@ -18,7 +18,7 @@ mod jpk_reader_py {
     };
     use std::{fs, path::PathBuf, sync::Arc};
 
-    type ReaderType = Arc<fs::File>;
+    type ReaderType = fs::File;
 
     const CHANNEL_NAME_LEN_HINT: usize = 10;
 
@@ -32,7 +32,7 @@ mod jpk_reader_py {
         #[new]
         fn new(path: PathBuf) -> PyResult<Self> {
             let file = fs::File::open(&path).map_err(|err| PyOSError::new_err(err.to_string()))?;
-            let reader = jpk::qi_map::Reader::new_versioned(Arc::new(file))
+            let reader = jpk::qi_map::Reader::new_versioned(file)
                 .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
             Ok(Self { inner: reader })
         }

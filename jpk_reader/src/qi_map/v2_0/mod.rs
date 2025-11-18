@@ -1,6 +1,5 @@
 use super::{IndexId, SegmentId, Value};
 use crate::properties::{self, Properties, PropertyError};
-use rayon::prelude::*;
 use std::{
     fmt,
     io::{self, Read},
@@ -80,7 +79,6 @@ impl SharedData {
     }
 }
 
-#[derive(Clone)]
 pub struct Reader<R> {
     archive: zip::ZipArchive<R>,
     dataset_info: DatasetInfo,
@@ -318,201 +316,23 @@ where
     }
 }
 
-// impl<R> super::QIMapReader for Reader<R>
-// where
-//     R: io::Read + io::Seek,
-// {
-//     fn query_data(&mut self, query: &super::DataQuery) -> Result<super::Data, super::QueryError> {
-//         let indices = self._data_query_indices(query)?;
-//         let mut data_idx = Vec::with_capacity(indices.len());
-//         for idx in indices {
-//             let index_data = self._index_data(idx)?;
-//             let segments = match &query.segment {
-//                 super::SegmentQuery::All => (0..index_data.segment_count()).collect::<Vec<_>>(),
-//                 super::SegmentQuery::Indices(indices) => indices.clone(),
-//             };
-
-//             for segment in segments {
-//                 let segment_properties = self._segment_properties(idx, segment)?;
-//                 let segment_data = self._segment_data(&segment_properties, idx)?;
-//                 let channels = match &query.channel {
-//                     super::ChannelQuery::All => segment_data.channels().clone(),
-//                     super::ChannelQuery::Include(channels) => {
-//                         let mut channels = channels.clone();
-//                         channels.retain(|channel| segment_data.channels().contains(channel));
-//                         channels
-//                     }
-//                 };
-
-//                 for channel in channels {
-//                     let channel_data =
-//                         self._channel_data(&segment_properties, &channel, idx, segment)?;
-//                     let pixel = self
-//                         .dataset_info
-//                         .position_pattern
-//                         .index_to_pixel(idx)
-//                         .expect("pixel to be valid");
-//                     data_idx.push((
-//                         super::DataIndex {
-//                             pixel,
-//                             segment,
-//                             channel,
-//                         },
-//                         idx,
-//                         channel_data.shared_data_index(),
-//                         channel_data.file_path().clone(),
-//                     ))
-//                 }
-//             }
-//         }
-
-//         let mut data = Vec::with_capacity(data_idx.len());
-//         for (idx, index, shared_data_index, file_path) in data_idx {
-//             let lcd_info = &self.lcd_info[shared_data_index];
-//             let data_file_path = {
-//                 let path = utils::index_segment_path(index, idx.segment);
-//                 let path = format!("{}/{}", path.to_string_lossy(), file_path.to_string_lossy());
-//                 PathBuf::from(path)
-//             };
-
-//             let mut data_file =
-//                 self.archive
-//                     .by_path(&data_file_path)
-//                     .map_err(|error| super::QueryError::Zip {
-//                         path: data_file_path.clone(),
-//                         error,
-//                     })?;
-//             let mut raw_data = Vec::with_capacity(data_file.size() as usize);
-//             data_file
-//                 .read_to_end(&mut raw_data)
-//                 .map_err(|err| super::QueryError::Zip {
-//                     path: data_file_path.clone(),
-//                     error: zip::result::ZipError::Io(err),
-//                 })?;
-
-//             let ch_data = lcd_info.convert_data(&raw_data).map_err(|_err| {
-//                 super::QueryError::InvalidData {
-//                     path: data_file_path.clone(),
-//                 }
-//             })?;
-
-//             data.push((idx, ch_data));
-//         }
-
-//         let (idx, data) = data.into_iter().unzip();
-//         let data = super::Data::new(idx, data).unwrap();
-//         Ok(data)
-//     }
-
-//     fn query_metadata(
-//         &mut self,
-//         query: &super::MetadataQuery,
-//     ) -> Result<super::Metadata, super::QueryError> {
-//         match query {
-//             super::MetadataQuery::Dataset => {
-//                 let mut properties = self
-//                     .archive
-//                     .by_path(utils::DATASET_PROPERTIES_FILE)
-//                     .map_err(|error| super::QueryError::Zip {
-//                         path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
-//                         error,
-//                     })?;
-
-//                 let properties = Properties::new(&mut properties).map_err(|_| {
-//                     super::QueryError::InvalidFormat {
-//                         path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
-//                         cause: "file could not be read as properties".to_string(),
-//                     }
-//                 })?;
-
-//                 let idx = vec![super::MetadataIndex::Dataset];
-//                 let data = vec![properties];
-//                 Ok(super::Metadata::new(idx, data).unwrap())
-//             }
-
-//             super::MetadataQuery::SharedData => {
-//                 let data_path = utils::shared_data_properties_path();
-//                 let mut properties =
-//                     self.archive
-//                         .by_path(&data_path)
-//                         .map_err(|error| super::QueryError::Zip {
-//                             path: data_path.clone(),
-//                             error,
-//                         })?;
-
-//                 let properties = Properties::new(&mut properties).map_err(|_| {
-//                     super::QueryError::InvalidFormat {
-//                         path: data_path.clone(),
-//                         cause: "file could not be read as properties".to_string(),
-//                     }
-//                 })?;
-
-//                 let idx = vec![super::MetadataIndex::SharedData];
-//                 let data = vec![properties];
-//                 Ok(super::Metadata::new(idx, data).unwrap())
-//             }
-
-//             super::MetadataQuery::Index(query) => match query {
-//                 super::IndexQuery::All => todo!(),
-//                 super::IndexQuery::PixelRect(rect) => todo!(),
-//                 super::IndexQuery::Pixel(pixel) => {
-//                     let Some(index) = self.dataset_info.position_pattern.pixel_to_index(pixel)
-//                     else {
-//                         return Err(super::QueryError::OutOfBounds(pixel.clone()));
-//                     };
-//                     let data_path = utils::index_properties_path(index);
-//                     let mut properties = self.archive.by_path(&data_path).map_err(|error| {
-//                         super::QueryError::Zip {
-//                             path: data_path.clone(),
-//                             error,
-//                         }
-//                     })?;
-//                     let properties = Properties::new(&mut properties).map_err(|_| {
-//                         super::QueryError::InvalidFormat {
-//                             path: data_path.clone(),
-//                             cause: "file could not be read as properties".to_string(),
-//                         }
-//                     })?;
-
-//                     let idx = vec![super::MetadataIndex::Pixel(pixel.clone())];
-//                     let data = vec![properties];
-//                     Ok(super::Metadata::new(idx, data).unwrap())
-//                 }
-//             },
-//             super::MetadataQuery::Segment { index, segment } => todo!(),
-//             super::MetadataQuery::All => todo!(),
-//         }
-//     }
-// }
-
 impl<R> super::QIMapReader for Reader<R>
 where
-    R: io::Read + io::Seek + Clone + Send + Sync,
+    R: io::Read + io::Seek,
 {
     fn query_data(&mut self, query: &super::DataQuery) -> Result<super::Data, super::QueryError> {
         let indices = self._data_query_indices(query)?;
-        let data_idx = indices
-            .into_par_iter()
-            .map_with(self.archive.clone(), |mut archive, idx| {
-                let index_data = utils::index_data(&mut archive, idx)?;
-                let segments = match &query.segment {
-                    super::SegmentQuery::All => (0..index_data.segment_count()).collect::<Vec<_>>(),
-                    super::SegmentQuery::Indices(indices) => indices.clone(),
-                };
+        let mut data_idx = Vec::with_capacity(indices.len());
+        for idx in indices {
+            let index_data = utils::index_data(&mut self.archive, idx)?;
+            let segments = match &query.segment {
+                super::SegmentQuery::All => (0..index_data.segment_count()).collect::<Vec<_>>(),
+                super::SegmentQuery::Indices(indices) => indices.clone(),
+            };
 
-                let idx = segments
-                    .into_iter()
-                    .map(|segment| (idx, segment))
-                    .collect::<Vec<_>>();
-                Ok(idx)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let data_idx = data_idx.into_iter().flatten().collect::<Vec<_>>();
-
-        let data_idx = data_idx
-            .into_par_iter()
-            .map_with(self.archive.clone(), |mut archive, (idx, segment)| {
-                let segment_properties = utils::segment_properties(&mut archive, idx, segment)?;
+            for segment in segments {
+                let segment_properties =
+                    utils::segment_properties(&mut self.archive, idx, segment)?;
                 let segment_data = utils::segment_data(&segment_properties, idx)?;
                 let channels = match &query.channel {
                     super::ChannelQuery::All => segment_data.channels().clone(),
@@ -523,94 +343,60 @@ where
                     }
                 };
 
-                let idx = channels
-                    .into_iter()
-                    .map(|channel| {
-                        let channel_data =
-                            utils::channel_data(&segment_properties, &channel, idx, segment)?;
+                for channel in channels {
+                    let channel_data =
+                        utils::channel_data(&segment_properties, &channel, idx, segment)?;
+                    let pixel = self
+                        .dataset_info
+                        .position_pattern
+                        .index_to_pixel(idx)
+                        .expect("pixel to be valid");
+                    data_idx.push((
+                        super::DataIndex {
+                            pixel,
+                            segment,
+                            channel,
+                        },
+                        idx,
+                        channel_data.shared_data_index(),
+                        channel_data.file_path().clone(),
+                    ))
+                }
+            }
+        }
 
-                        Ok(((idx, segment, channel), channel_data))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
+        let mut data = Vec::with_capacity(data_idx.len());
+        for (idx, index, shared_data_index, file_path) in data_idx {
+            let lcd_info = &self.lcd_info[shared_data_index];
+            let data_file_path = {
+                let path = utils::index_segment_path(index, idx.segment);
+                let path = format!("{}/{}", path.to_string_lossy(), file_path.to_string_lossy());
+                PathBuf::from(path)
+            };
 
-                Ok(idx)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let data_idx = data_idx
-            .into_iter()
-            .flatten()
-            .map(|((idx, segment, channel), channel_data)| {
-                let pixel = self
-                    .dataset_info
-                    .position_pattern
-                    .index_to_pixel(idx)
-                    .expect("pixel to be valid");
-                (
-                    super::DataIndex {
-                        pixel,
-                        segment,
-                        channel,
-                    },
-                    idx,
-                    channel_data.shared_data_index(),
-                    channel_data.file_path().clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-
-        // let data_idx = data_idx
-        //     .into_iter()
-        //     .map(|(idx, index, shared_data_index, file_path)| {
-        //         let lcd_info = self.lcd_info[shared_data_index].clone();
-        //         (idx, index, lcd_info, file_path)
-        //     })
-        //     .collect::<Vec<_>>();
-
-        let raw_data = data_idx
-            .into_par_iter()
-            .map_with(
-                self.archive.clone(),
-                |mut archive, (idx, index, shared_data_index, file_path)| {
-                    let data_file_path = {
-                        let path = utils::index_segment_path(index, idx.segment);
-                        let path =
-                            format!("{}/{}", path.to_string_lossy(), file_path.to_string_lossy());
-                        PathBuf::from(path)
-                    };
-
-                    let mut data_file = archive.by_path(&data_file_path).map_err(|error| {
-                        super::QueryError::Zip {
-                            path: data_file_path.clone(),
-                            error,
-                        }
-                    })?;
-                    let mut raw_data = Vec::with_capacity(data_file.size() as usize);
-                    data_file
-                        .read_to_end(&mut raw_data)
-                        .map_err(|err| super::QueryError::Zip {
-                            path: data_file_path.clone(),
-                            error: zip::result::ZipError::Io(err),
-                        })?;
-
-                    Ok((idx, raw_data, data_file_path, shared_data_index))
-                },
-            )
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let data = raw_data
-            .into_iter()
-            .map(|(idx, raw_data, data_file_path, shared_data_index)| {
-                let lcd_info = self.lcd_info[shared_data_index].clone();
-                let ch_data = lcd_info.convert_data(&raw_data).map_err(|_err| {
-                    super::QueryError::InvalidData {
+            let mut data_file =
+                self.archive
+                    .by_path(&data_file_path)
+                    .map_err(|error| super::QueryError::Zip {
                         path: data_file_path.clone(),
-                    }
+                        error,
+                    })?;
+            let mut raw_data = Vec::with_capacity(data_file.size() as usize);
+            data_file
+                .read_to_end(&mut raw_data)
+                .map_err(|err| super::QueryError::Zip {
+                    path: data_file_path.clone(),
+                    error: zip::result::ZipError::Io(err),
                 })?;
 
-                Ok((idx, ch_data))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            let ch_data = lcd_info.convert_data(&raw_data).map_err(|_err| {
+                super::QueryError::InvalidData {
+                    path: data_file_path.clone(),
+                }
+            })?;
+
+            data.push((idx, ch_data));
+        }
 
         let (idx, data) = data.into_iter().unzip();
         let data = super::Data::new(idx, data).unwrap();
@@ -697,7 +483,6 @@ where
         }
     }
 }
-
 impl<R> Reader<R>
 where
     R: io::Read + io::Seek,
@@ -740,18 +525,15 @@ impl DatasetProperties {
     const INDEX_MAX_KEY: &str = "quantitative-imaging-map.indexes.max";
 }
 
-#[derive(Clone)]
 pub struct DatasetInfo {
     index: Index,
     position_pattern: PositionPattern,
 }
 
-#[derive(Clone)]
 enum Index {
     Range { min: usize, max: usize },
 }
 
-#[derive(Clone)]
 struct PositionPattern {
     numbering: Numbering,
     kind: PositionPatternType,
@@ -804,7 +586,6 @@ impl PositionPattern {
     }
 }
 
-#[derive(Clone)]
 enum Numbering {
     LeftToRight,
 }
@@ -818,7 +599,6 @@ impl Numbering {
     }
 }
 
-#[derive(Clone)]
 enum PositionPatternType {
     Grid(Grid),
 }
@@ -838,7 +618,6 @@ impl PositionPatternType {
     }
 }
 
-#[derive(Clone)]
 struct Grid {
     x_center: f64,
     y_center: f64,

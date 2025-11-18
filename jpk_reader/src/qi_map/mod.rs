@@ -392,14 +392,14 @@ impl FormatVersion {
     }
 }
 
-#[derive(derive_more::From, Clone)]
+#[derive(derive_more::From)]
 pub enum VersionedReader<R> {
     V2_0(v2_0::Reader<R>),
 }
 
 impl<R> QIMapReader for VersionedReader<R>
 where
-    R: io::Read + io::Seek + Clone + Send + Sync,
+    R: io::Read + io::Seek,
 {
     fn query_data(&mut self, query: &DataQuery) -> Result<Data, QueryError> {
         match self {
