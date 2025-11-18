@@ -2,6 +2,7 @@ use super::Value;
 use crate::properties::{self, PropertyError};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct LcdInfo {
     data_type: DataType,
     channel_info: ChannelInfo,
@@ -71,6 +72,7 @@ impl LcdInfo {
     }
 }
 
+#[derive(Clone)]
 pub enum DataType {
     /// Refer to encoder for concrete data type.
     Integer,
@@ -88,6 +90,7 @@ impl DataType {
     }
 }
 
+#[derive(Clone)]
 pub struct ChannelInfo {
     pub kind: ChannelType,
     pub name: String,
@@ -129,6 +132,7 @@ impl ChannelInfo {
     }
 }
 
+#[derive(Clone)]
 pub enum ChannelType {
     Channel,
 }
@@ -408,8 +412,9 @@ mod conversion {
         Value, scale,
     };
     use crate::properties;
-    use std::fmt;
+    use std::{fmt, sync::Arc};
 
+    #[derive(Clone)]
     pub struct ConversionSet {
         quantities: Vec<String>,
         base: String,
@@ -482,11 +487,12 @@ mod conversion {
         }
     }
 
+    #[derive(Clone)]
     pub struct Conversion {
         name: String,
         base_slot: String,
         calibration_slot: String,
-        scale: Box<dyn scale::Scale<Value> + Sync + Send>,
+        scale: Arc<dyn scale::Scale<Value> + Sync + Send>,
     }
 
     impl Conversion {
@@ -558,7 +564,7 @@ mod conversion {
                     Self::_create_linear_offset_multiplier(properties, index, &conversion)?
                 }
             };
-            let scale = Box::new(scale);
+            let scale = Arc::new(scale);
 
             Ok(Self {
                 name: name.clone(),

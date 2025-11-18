@@ -50,6 +50,11 @@ impl Data {
         let idx = self.indices.binary_search(index).ok()?;
         Some(&self.data[idx])
     }
+
+    pub fn into_parts(self) -> (Vec<DataIndex>, Vec<Vec<Value>>) {
+        let Data { indices, data } = self;
+        (indices, data)
+    }
 }
 
 pub struct Metadata {
@@ -322,6 +327,14 @@ impl Pixel {
         Self { i, j }
     }
 
+    pub fn i(&self) -> IndexId {
+        self.i
+    }
+
+    pub fn j(&self) -> IndexId {
+        self.j
+    }
+
     pub fn to_index(&self, cols: IndexId) -> IndexId {
         self.j * cols + self.i
     }
@@ -359,6 +372,12 @@ pub enum QueryError {
     },
 }
 
+impl fmt::Display for QueryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
 pub enum FormatVersion {
     // 2.0
     V2_0,
@@ -373,14 +392,14 @@ impl FormatVersion {
     }
 }
 
-#[derive(derive_more::From)]
+#[derive(derive_more::From, Clone)]
 pub enum VersionedReader<R> {
     V2_0(v2_0::Reader<R>),
 }
 
 impl<R> QIMapReader for VersionedReader<R>
 where
-    R: io::Read + io::Seek,
+    R: io::Read + io::Seek + Clone + Send + Sync,
 {
     fn query_data(&mut self, query: &DataQuery) -> Result<Data, QueryError> {
         match self {
@@ -399,7 +418,7 @@ pub struct Reader;
 impl Reader {
     pub fn new<R>(reader: R) -> Result<impl QIMapReader, Error>
     where
-        R: io::Read + io::Seek,
+        R: io::Read + io::Seek + Clone + Send + Sync,
     {
         let mut archive = zip::ZipArchive::new(reader)?;
         let format_version = Self::format_version(&mut archive)?;

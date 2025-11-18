@@ -1,8 +1,8 @@
 use jpk_reader::qi_map::{self, QIMapReader};
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::Arc};
 
 const DATA_DIR: &str = "../data/qi_data";
-const DATA_FILE: &str = "qi_data.jpk-qi-data";
+const DATA_FILE: &str = "qi_data-2_0-lg.jpk-qi-data";
 
 #[test]
 fn qi_map() {
@@ -11,7 +11,7 @@ fn qi_map() {
         .join(DATA_FILE);
 
     let file = fs::File::open(&data_path).unwrap();
-    let mut data = qi_map::Reader::new(file).unwrap();
+    let mut data = qi_map::Reader::new(Arc::new(file)).unwrap();
     let pixel = qi_map::Pixel::new(0, 0);
 
     let query = qi_map::DataQuery {
