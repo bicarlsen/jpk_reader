@@ -418,7 +418,7 @@ pub struct Reader;
 impl Reader {
     pub fn new<R>(reader: R) -> Result<impl QIMapReader, Error>
     where
-        R: io::Read + io::Seek + Clone + Send + Sync,
+        R: io::Read + io::Seek,
     {
         let mut archive = zip::ZipArchive::new(reader)?;
         let format_version = Self::format_version(&mut archive)?;

@@ -6,7 +6,7 @@ pub struct LcdInfo {
     data_type: DataType,
     channel_info: ChannelInfo,
     unit: String,
-    decoder: Arc<dyn decoder::Decode>,
+    decoder: Arc<dyn decoder::Decode + Sync + Send>,
     conversion_set: conversion::ConversionSet,
 }
 
@@ -269,12 +269,12 @@ pub mod decoder {
     }
 
     pub struct IntDecoder<T> {
-        scale: Arc<dyn Scale<T>>,
+        scale: Arc<dyn Scale<T> + Sync + Send>,
         unit: String,
     }
 
     impl<T> IntDecoder<T> {
-        pub fn new(scale: Arc<dyn Scale<T>>, unit: String) -> Self {
+        pub fn new(scale: Arc<dyn Scale<T> + Sync + Send>, unit: String) -> Self {
             Self { scale, unit }
         }
 
@@ -287,7 +287,7 @@ pub mod decoder {
     pub fn int_from_properties(
         properties: &SharedData,
         idx: usize,
-    ) -> Result<Arc<dyn Decode>, super::PropertyError> {
+    ) -> Result<Arc<dyn Decode + Sync + Send>, super::PropertyError> {
         use super::scale::{Style, Type};
 
         let data_type = properties::extract_value!(properties, SharedData::lcd_info_encoder_type_key(idx), from_str DataType)?;
@@ -408,7 +408,7 @@ mod conversion {
         Value, scale,
     };
     use crate::properties;
-    use std::{fmt, rc::Rc};
+    use std::{fmt, sync::Arc};
 
     pub struct ConversionSet {
         quantities: Vec<String>,
@@ -486,7 +486,7 @@ mod conversion {
         name: String,
         base_slot: String,
         calibration_slot: String,
-        scale: Rc<dyn scale::Scale<Value>>,
+        scale: Arc<dyn scale::Scale<Value> + Sync + Send>,
     }
 
     impl Conversion {
@@ -558,7 +558,7 @@ mod conversion {
                     Self::_create_linear_offset_multiplier(properties, index, &conversion)?
                 }
             };
-            let scale = Rc::new(scale);
+            let scale = Arc::new(scale);
 
             Ok(Self {
                 name: name.clone(),
