@@ -13,3 +13,8 @@ classifiers = [
 dynamic = ["version"]
 
 dependencies = ["pyarrow"]
+
+[project.urls]
+Issues = "https://github.com/bicarlsen/jpk_reader/issues"
+Source = "https://github.com/bicarlsen/jpk_reader"
+Homepage = "https://github.com/bicarlsen/jpk_reader"

@@ -5,7 +5,7 @@ edition = "2024"
 
 authors = ["Brian Carlsen <carlsen.bri@gmail.com>"]
 description = "Python bindings for JPK data reader."
-license = "GNU GPLv3"
+license = "MIT OR Apache-2.0"
 
 repository = "https://github.com/bicarlsen/jpk_reader"
 keywords = ["afm", "atomic force microscopy", "jpk", "bruker"]

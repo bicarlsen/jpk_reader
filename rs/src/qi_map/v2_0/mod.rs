@@ -101,6 +101,22 @@ impl FileReader {
             file_path: path,
         })
     }
+
+    /// Create a new file reader with an archive that has already been loaded.
+    ///
+    /// # Safety
+    /// It is left to the user to ensure that `path` and `archive` are compatible.
+    pub unsafe fn new_with_archive(
+        path: impl Into<PathBuf>,
+        archive: zip::ZipArchive<fs::File>,
+    ) -> Result<Self, super::Error> {
+        let path = path.into();
+        let inner = Reader::new(archive)?;
+        Ok(Self {
+            inner,
+            file_path: path,
+        })
+    }
 }
 
 impl super::QIMapReader for FileReader {

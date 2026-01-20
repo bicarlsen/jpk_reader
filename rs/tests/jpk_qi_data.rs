@@ -3,6 +3,16 @@ use std::{fs, path::PathBuf};
 
 const DATA_DIR: &str = "../data/qi_data";
 const DATA_FILE: &str = "qi_data-2_0-lg.jpk-qi-data";
+#[test]
+fn qi_map_file_reader_format_version() {
+    let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(DATA_DIR)
+        .join(DATA_FILE);
+
+    let version_str = qi_map::FileReader::format_version(data_path).unwrap();
+    let version = qi_map::FormatVersion::from_str(version_str).unwrap();
+    assert!(matches!(version, qi_map::FormatVersion::V2_0))
+}
 
 #[test]
 fn qi_map_reader() {

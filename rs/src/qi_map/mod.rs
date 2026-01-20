@@ -441,7 +441,12 @@ impl FileReader {
     /// Create a new reader based on the format version.
     pub fn new(path: impl Into<PathBuf>) -> Result<impl QIMapReader, Error> {
         let path = path.into();
-        let format_version = Self::format_version(&path)?;
+        let file = fs::File::open(&path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => Error::OpenArchive(zip::result::ZipError::FileNotFound),
+            _ => Error::OpenArchive(zip::result::ZipError::Io(err)),
+        })?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let format_version = Reader::format_version(&mut archive)?;
         let Some(format_version) = FormatVersion::from_str(&format_version) else {
             return Err(Error::FileFormatNotSupported {
                 version: format_version.clone(),
@@ -449,14 +454,19 @@ impl FileReader {
         };
 
         match format_version {
-            FormatVersion::V2_0 => v2_0::FileReader::new(path).into(),
+            FormatVersion::V2_0 => unsafe { v2_0::FileReader::new_with_archive(path, archive) },
         }
     }
 
     /// Get a new JPK reader based on the format version.
     pub fn new_versioned(path: impl Into<PathBuf>) -> Result<VersionedFileReader, Error> {
         let path = path.into();
-        let format_version = Self::format_version(&path)?;
+        let file = fs::File::open(&path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => Error::OpenArchive(zip::result::ZipError::FileNotFound),
+            _ => Error::OpenArchive(zip::result::ZipError::Io(err)),
+        })?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let format_version = Reader::format_version(&mut archive)?;
         let Some(format_version) = FormatVersion::from_str(&format_version) else {
             return Err(Error::FileFormatNotSupported {
                 version: format_version.clone(),
@@ -464,7 +474,10 @@ impl FileReader {
         };
 
         let reader = match format_version {
-            FormatVersion::V2_0 => v2_0::FileReader::new(path)?.into(),
+            FormatVersion::V2_0 => {
+                let reader = unsafe { v2_0::FileReader::new_with_archive(path, archive)? };
+                reader.into()
+            }
         };
         Ok(reader)
     }
