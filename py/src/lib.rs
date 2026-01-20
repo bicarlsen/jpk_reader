@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 
 /// A Python module implemented in Rust.
 #[pymodule]
-mod jpk_reader_py {
+mod jpk_reader {
     use arrow::{
         array::{
             ArrayRef, Float64Builder, ListBuilder, RecordBatch, StringBuilder, UInt8Builder,
@@ -18,21 +18,18 @@ mod jpk_reader_py {
     };
     use std::{fs, path::PathBuf, sync::Arc};
 
-    type ReaderType = fs::File;
-
     const CHANNEL_NAME_LEN_HINT: usize = 10;
 
     #[pyclass]
     pub struct QIMapReader {
-        inner: jpk::qi_map::VersionedReader<ReaderType>,
+        inner: jpk::qi_map::VersionedFileReader,
     }
 
     #[pymethods]
     impl QIMapReader {
         #[new]
         fn new(path: PathBuf) -> PyResult<Self> {
-            let file = fs::File::open(&path).map_err(|err| PyOSError::new_err(err.to_string()))?;
-            let reader = jpk::qi_map::Reader::new_versioned(file)
+            let reader = jpk::qi_map::FileReader::new_versioned(path)
                 .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
             Ok(Self { inner: reader })
         }

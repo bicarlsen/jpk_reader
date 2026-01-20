@@ -1,10 +1,10 @@
 [package]
-name = "jpk_reader-py"
+name = "jpk-reader-rs"
 version = "0.0.1"
 edition = "2024"
 
 authors = ["Brian Carlsen <carlsen.bri@gmail.com>"]
-description = "Python bindings for JPK data."
+description = "Python bindings for JPK data reader."
 license = "GNU GPLv3"
 
 repository = "https://github.com/bicarlsen/jpk_reader"
@@ -13,7 +13,7 @@ categories = ["science"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-name = "jpk_reader_py"
+name = "jpk_reader_rs"
 crate-type = ["cdylib"]
 
 [dependencies]

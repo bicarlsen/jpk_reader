@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
 
-members = ["jpk_reader", "jpk_reader-py"]
-default-members = ["jpk_reader"]
+members = ["rs", "py"]
+default-members = ["rs"]
 
 [workspace.dependencies]
-jpk_reader = { path = "jpk_reader" }
-jpk_reader_py = { path = "jpk_reader-py" }
+jpk_reader = { path = "rs" }
+jpk_reader_rs = { path = "py" }
 
 derive_more = "2.0"
 tracing-subscriber = "0.3"

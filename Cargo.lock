@@ -635,6 +635,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jpk-reader-rs"
+version = "0.0.1"
+dependencies = [
+ "arrow",
+ "jpk_reader",
+ "pyo3",
+]
+
+[[package]]
 name = "jpk_reader"
 version = "0.0.1"
 dependencies = [
@@ -644,15 +653,6 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "zip",
-]
-
-[[package]]
-name = "jpk_reader-py"
-version = "0.0.1"
-dependencies = [
- "arrow",
- "jpk_reader",
- "pyo3",
 ]
 
 [[package]]
