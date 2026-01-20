@@ -1,9 +1,5 @@
 use jpk_reader::qi_map::{self, QIMapReader};
-use std::{
-    fs,
-    path::PathBuf,
-    time::{self, Instant},
-};
+use std::{fs, path::PathBuf};
 
 const DATA_DIR: &str = "../data/qi_data";
 const DATA_FILE: &str = "qi_data-2_0-lg.jpk-qi-data";
@@ -41,7 +37,6 @@ fn qi_map_reader() {
     let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel.clone()));
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
-    println!("reader: {:?}", t0.elapsed());
 
     // long running test
     // let query = qi_map::DataQuery::select_all();
@@ -80,7 +75,6 @@ fn qi_map_file_reader() {
     let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel.clone()));
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
-    println!("file reader: {:?}", t0.elapsed());
 
     let query = qi_map::DataQuery::select_all();
     let all = data.query_data(&query).unwrap();

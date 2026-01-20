@@ -1,5 +1,8 @@
 use crate::properties::Properties;
-use std::{cmp, fmt, fs, io, path::PathBuf};
+use std::{
+    cmp, fmt, fs, io,
+    path::{Path, PathBuf},
+};
 
 mod v2_0;
 
@@ -438,12 +441,7 @@ impl FileReader {
     /// Create a new reader based on the format version.
     pub fn new(path: impl Into<PathBuf>) -> Result<impl QIMapReader, Error> {
         let path = path.into();
-        let file = fs::File::open(&path).map_err(|err| match err.kind() {
-            io::ErrorKind::NotFound => Error::OpenArchive(zip::result::ZipError::FileNotFound),
-            _ => Error::OpenArchive(zip::result::ZipError::Io(err)),
-        })?;
-        let mut archive = zip::ZipArchive::new(file)?;
-        let format_version = Self::format_version(&mut archive)?;
+        let format_version = Self::format_version(&path)?;
         let Some(format_version) = FormatVersion::from_str(&format_version) else {
             return Err(Error::FileFormatNotSupported {
                 version: format_version.clone(),
@@ -456,14 +454,9 @@ impl FileReader {
     }
 
     /// Get a new JPK reader based on the format version.
-    pub fn new_versioned<R>(path: impl Into<PathBuf>) -> Result<VersionedFileReader, Error> {
+    pub fn new_versioned(path: impl Into<PathBuf>) -> Result<VersionedFileReader, Error> {
         let path = path.into();
-        let file = fs::File::open(&path).map_err(|err| match err.kind() {
-            io::ErrorKind::NotFound => Error::OpenArchive(zip::result::ZipError::FileNotFound),
-            _ => Error::OpenArchive(zip::result::ZipError::Io(err)),
-        })?;
-        let mut archive = zip::ZipArchive::new(file)?;
-        let format_version = Self::format_version(&mut archive)?;
+        let format_version = Self::format_version(&path)?;
         let Some(format_version) = FormatVersion::from_str(&format_version) else {
             return Err(Error::FileFormatNotSupported {
                 version: format_version.clone(),
@@ -477,10 +470,12 @@ impl FileReader {
     }
 
     /// Get the JPK version format of the archive.
-    pub fn format_version<R>(archive: &mut zip::ZipArchive<R>) -> Result<String, Error>
-    where
-        R: io::Read + io::Seek,
-    {
+    pub fn format_version(path: impl AsRef<Path>) -> Result<String, Error> {
+        let file = fs::File::open(path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => Error::OpenArchive(zip::result::ZipError::FileNotFound),
+            _ => Error::OpenArchive(zip::result::ZipError::Io(err)),
+        })?;
+        let mut archive = zip::ZipArchive::new(file)?;
         let properties = {
             let mut properties =
                 archive
