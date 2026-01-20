@@ -2,6 +2,7 @@ use super::Value;
 use crate::properties::{self, PropertyError};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct LcdInfo {
     data_type: DataType,
     channel_info: ChannelInfo,
@@ -71,6 +72,7 @@ impl LcdInfo {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum DataType {
     /// Refer to encoder for concrete data type.
     Integer,
@@ -88,6 +90,7 @@ impl DataType {
     }
 }
 
+#[derive(Clone)]
 pub struct ChannelInfo {
     pub kind: ChannelType,
     pub name: String,
@@ -129,6 +132,7 @@ impl ChannelInfo {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum ChannelType {
     Channel,
 }
@@ -410,6 +414,7 @@ mod conversion {
     use crate::properties;
     use std::{fmt, sync::Arc};
 
+    #[derive(Clone)]
     pub struct ConversionSet {
         quantities: Vec<String>,
         base: String,
@@ -482,6 +487,7 @@ mod conversion {
         }
     }
 
+    #[derive(Clone)]
     pub struct Conversion {
         name: String,
         base_slot: String,

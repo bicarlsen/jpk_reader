@@ -1,5 +1,5 @@
 use crate::properties::Properties;
-use std::{cmp, fmt, io, path::PathBuf};
+use std::{cmp, fmt, fs, io, path::PathBuf};
 
 mod v2_0;
 
@@ -393,6 +393,25 @@ impl FormatVersion {
 }
 
 #[derive(derive_more::From)]
+pub enum VersionedFileReader {
+    V2_0(v2_0::FileReader),
+}
+
+impl QIMapReader for VersionedFileReader {
+    fn query_data(&mut self, query: &DataQuery) -> Result<Data, QueryError> {
+        match self {
+            VersionedFileReader::V2_0(reader) => reader.query_data(query),
+        }
+    }
+
+    fn query_metadata(&mut self, query: &MetadataQuery) -> Result<Metadata, QueryError> {
+        match self {
+            VersionedFileReader::V2_0(reader) => reader.query_metadata(query),
+        }
+    }
+}
+
+#[derive(derive_more::From)]
 pub enum VersionedReader<R> {
     V2_0(v2_0::Reader<R>),
 }
@@ -414,8 +433,83 @@ where
     }
 }
 
+pub struct FileReader;
+impl FileReader {
+    /// Create a new reader based on the format version.
+    pub fn new(path: impl Into<PathBuf>) -> Result<impl QIMapReader, Error> {
+        let path = path.into();
+        let file = fs::File::open(&path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => Error::OpenArchive(zip::result::ZipError::FileNotFound),
+            _ => Error::OpenArchive(zip::result::ZipError::Io(err)),
+        })?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let format_version = Self::format_version(&mut archive)?;
+        let Some(format_version) = FormatVersion::from_str(&format_version) else {
+            return Err(Error::FileFormatNotSupported {
+                version: format_version.clone(),
+            });
+        };
+
+        match format_version {
+            FormatVersion::V2_0 => v2_0::FileReader::new(path).into(),
+        }
+    }
+
+    /// Get a new JPK reader based on the format version.
+    pub fn new_versioned<R>(path: impl Into<PathBuf>) -> Result<VersionedFileReader, Error> {
+        let path = path.into();
+        let file = fs::File::open(&path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => Error::OpenArchive(zip::result::ZipError::FileNotFound),
+            _ => Error::OpenArchive(zip::result::ZipError::Io(err)),
+        })?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let format_version = Self::format_version(&mut archive)?;
+        let Some(format_version) = FormatVersion::from_str(&format_version) else {
+            return Err(Error::FileFormatNotSupported {
+                version: format_version.clone(),
+            });
+        };
+
+        let reader = match format_version {
+            FormatVersion::V2_0 => v2_0::FileReader::new(path)?.into(),
+        };
+        Ok(reader)
+    }
+
+    /// Get the JPK version format of the archive.
+    pub fn format_version<R>(archive: &mut zip::ZipArchive<R>) -> Result<String, Error>
+    where
+        R: io::Read + io::Seek,
+    {
+        let properties = {
+            let mut properties =
+                archive
+                    .by_path(PROPERTIES_FILE_PATH)
+                    .map_err(|error| Error::Zip {
+                        path: PathBuf::from(PROPERTIES_FILE_PATH),
+                        error,
+                    })?;
+
+            Properties::new(&mut properties).map_err(|_err| Error::InvalidFormat {
+                path: PathBuf::from(PROPERTIES_FILE_PATH),
+                cause: "invalid format".to_string(),
+            })?
+        };
+
+        let Some(format_version) = properties.get(PROPERTIES_FILE_FORMAT_VERSION_KEY) else {
+            return Err(Error::InvalidFormat {
+                path: PathBuf::from(PROPERTIES_FILE_PATH),
+                cause: format!("property `{PROPERTIES_FILE_FORMAT_VERSION_KEY}` not found"),
+            });
+        };
+
+        Ok(format_version.clone())
+    }
+}
+
 pub struct Reader;
 impl Reader {
+    /// Create a new reader based on the format version.
     pub fn new<R>(reader: R) -> Result<impl QIMapReader, Error>
     where
         R: io::Read + io::Seek,
@@ -433,6 +527,7 @@ impl Reader {
         }
     }
 
+    /// Get a new JPK reader based on the format version.
     pub fn new_versioned<R>(reader: R) -> Result<VersionedReader<R>, Error>
     where
         R: io::Read + io::Seek,
@@ -451,6 +546,7 @@ impl Reader {
         Ok(reader)
     }
 
+    /// Get the JPK version format of the archive.
     pub fn format_version<R>(archive: &mut zip::ZipArchive<R>) -> Result<String, Error>
     where
         R: io::Read + io::Seek,

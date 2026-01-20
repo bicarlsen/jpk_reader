@@ -1,7 +1,8 @@
 use super::{IndexId, SegmentId, Value};
 use crate::properties::{self, Properties, PropertyError};
+use rayon::prelude::*;
 use std::{
-    fmt,
+    fmt, fs,
     io::{self, Read},
     path::PathBuf,
 };
@@ -76,6 +77,192 @@ impl SharedData {
     /// `lcd-info.{index}.encoder.scaling.multiplier`
     pub fn lcd_info_encoder_scaling_multiplier_key(index: usize) -> String {
         format!("lcd-info.{index}.encoder.scaling.multiplier")
+    }
+}
+
+/// JPK reader optimized for files.
+/// Allows parallel reading of datasets, where as [`Reader`] must read things in series.
+pub struct FileReader {
+    inner: Reader<fs::File>,
+    file_path: PathBuf,
+}
+
+impl FileReader {
+    pub fn new(path: impl Into<PathBuf>) -> Result<Self, super::Error> {
+        let path = path.into();
+        let file = fs::File::open(&path).map_err(|err| match err.kind() {
+            io::ErrorKind::NotFound => zip::result::ZipError::FileNotFound,
+            _ => zip::result::ZipError::Io(err),
+        })?;
+        let archive = zip::ZipArchive::new(file)?;
+        let inner = Reader::new(archive)?;
+        Ok(Self {
+            inner,
+            file_path: path,
+        })
+    }
+}
+
+impl super::QIMapReader for FileReader {
+    fn query_data(&mut self, query: &super::DataQuery) -> Result<super::Data, super::QueryError> {
+        let indices = self.inner._data_query_indices(query)?;
+        let data_idx = indices
+            .into_par_iter()
+            .map_init(
+                {
+                    let metadata = self.inner.archive.metadata();
+                    let file_path = &self.file_path;
+                    move || {
+                        let file = fs::File::open(file_path).expect("could not open file");
+                        unsafe { zip::ZipArchive::unsafe_new_with_metadata(file, metadata.clone()) }
+                    }
+                },
+                |archive, idx| {
+                    let index_data = utils::index_data(archive, idx)?;
+                    let segments = match &query.segment {
+                        super::SegmentQuery::All => {
+                            (0..index_data.segment_count()).collect::<Vec<_>>()
+                        }
+                        super::SegmentQuery::Indices(indices) => indices.clone(),
+                    };
+
+                    let idx = segments
+                        .into_iter()
+                        .map(|segment| (idx, segment))
+                        .collect::<Vec<_>>();
+                    Ok(idx)
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+        let data_idx = data_idx.into_iter().flatten().collect::<Vec<_>>();
+
+        let data_idx = data_idx
+            .into_par_iter()
+            .map_init(
+                {
+                    let metadata = self.inner.archive.metadata();
+                    let file_path = &self.file_path;
+                    move || {
+                        let file = fs::File::open(file_path).expect("could not open file");
+                        unsafe { zip::ZipArchive::unsafe_new_with_metadata(file, metadata.clone()) }
+                    }
+                },
+                |archive, (idx, segment)| {
+                    let segment_properties = utils::segment_properties(archive, idx, segment)?;
+                    let segment_data = utils::segment_data(&segment_properties, idx)?;
+                    let channels = match &query.channel {
+                        super::ChannelQuery::All => segment_data.channels().clone(),
+                        super::ChannelQuery::Include(channels) => {
+                            let mut channels = channels.clone();
+                            channels.retain(|channel| segment_data.channels().contains(channel));
+                            channels
+                        }
+                    };
+
+                    let idx = channels
+                        .into_iter()
+                        .map(|channel| {
+                            let channel_data =
+                                utils::channel_data(&segment_properties, &channel, idx, segment)?;
+
+                            Ok(((idx, segment, channel), channel_data))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    Ok(idx)
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let data_idx = data_idx
+            .into_iter()
+            .flatten()
+            .map(|((idx, segment, channel), channel_data)| {
+                let pixel = self
+                    .inner
+                    .dataset_info
+                    .position_pattern
+                    .index_to_pixel(idx)
+                    .expect("pixel to be valid");
+                (
+                    super::DataIndex {
+                        pixel,
+                        segment,
+                        channel,
+                    },
+                    idx,
+                    channel_data.shared_data_index(),
+                    channel_data.file_path().clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let raw_data = data_idx
+            .into_par_iter()
+            .map_init(
+                {
+                    let metadata = self.inner.archive.metadata();
+                    let file_path = &self.file_path;
+                    move || {
+                        let file = fs::File::open(file_path).expect("could not open file");
+                        unsafe { zip::ZipArchive::unsafe_new_with_metadata(file, metadata.clone()) }
+                    }
+                },
+                |archive, (idx, index, shared_data_index, file_path)| {
+                    let data_file_path = {
+                        let path = utils::index_segment_path(index, idx.segment);
+                        let path =
+                            format!("{}/{}", path.to_string_lossy(), file_path.to_string_lossy());
+                        PathBuf::from(path)
+                    };
+
+                    let mut data_file = archive.by_path(&data_file_path).map_err(|error| {
+                        super::QueryError::Zip {
+                            path: data_file_path.clone(),
+                            error,
+                        }
+                    })?;
+                    let mut raw_data = Vec::with_capacity(data_file.size() as usize);
+                    data_file
+                        .read_to_end(&mut raw_data)
+                        .map_err(|err| super::QueryError::Zip {
+                            path: data_file_path.clone(),
+                            error: zip::result::ZipError::Io(err),
+                        })?;
+
+                    Ok((idx, raw_data, data_file_path, shared_data_index))
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let lcd_info = &self.inner.lcd_info;
+        let data = raw_data
+            .into_par_iter()
+            .map_with(
+                lcd_info,
+                |lcd_info, (idx, raw_data, data_file_path, shared_data_index)| {
+                    let lcd_info = &lcd_info[shared_data_index];
+                    let ch_data = lcd_info.convert_data(&raw_data).map_err(|_err| {
+                        super::QueryError::InvalidData {
+                            path: data_file_path.clone(),
+                        }
+                    })?;
+
+                    Ok((idx, ch_data))
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let (idx, data) = data.into_iter().unzip();
+        let data = super::Data::new(idx, data).unwrap();
+        Ok(data)
+    }
+
+    fn query_metadata(
+        &mut self,
+        query: &super::MetadataQuery,
+    ) -> Result<super::Metadata, super::QueryError> {
+        self.inner.query_metadata(query)
     }
 }
 

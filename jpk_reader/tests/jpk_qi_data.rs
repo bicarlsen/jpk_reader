@@ -1,11 +1,15 @@
 use jpk_reader::qi_map::{self, QIMapReader};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{self, Instant},
+};
 
 const DATA_DIR: &str = "../data/qi_data";
 const DATA_FILE: &str = "qi_data-2_0-lg.jpk-qi-data";
 
 #[test]
-fn qi_map() {
+fn qi_map_reader() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
         .join(DATA_FILE);
@@ -37,10 +41,49 @@ fn qi_map() {
     let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel.clone()));
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
+    println!("reader: {:?}", t0.elapsed());
 
     // long running test
-    // let query = qi_map::Query::select_all();
+    // let query = qi_map::DataQuery::select_all();
     // let all = data.query_data(&query).unwrap();
+}
+
+#[test]
+fn qi_map_file_reader() {
+    let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(DATA_DIR)
+        .join(DATA_FILE);
+
+    let mut data = qi_map::FileReader::new(data_path).unwrap();
+    let pixel = qi_map::Pixel::new(0, 0);
+
+    let query = qi_map::DataQuery {
+        index: qi_map::IndexQuery::Pixel(pixel.clone()),
+        segment: qi_map::SegmentQuery::Indices(vec![0]),
+        channel: qi_map::ChannelQuery::include(vec!["measuredHeight", "smoothedMeasuredHeight"]),
+    };
+    let result = data.query_data(&query).unwrap();
+    assert_eq!(result.len(), 2);
+    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "measuredHeight");
+    let values = result.get(&idx).unwrap();
+    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "smoothedMeasuredHeight");
+    let values = result.get(&idx).unwrap();
+
+    let query = qi_map::MetadataQuery::Dataset;
+    let result = data.query_metadata(&query).unwrap();
+    assert_eq!(result.len(), 1);
+
+    let query = qi_map::MetadataQuery::SharedData;
+    let result = data.query_metadata(&query).unwrap();
+    assert_eq!(result.len(), 1);
+
+    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel.clone()));
+    let result = data.query_metadata(&query).unwrap();
+    assert_eq!(result.len(), 1);
+    println!("file reader: {:?}", t0.elapsed());
+
+    let query = qi_map::DataQuery::select_all();
+    let all = data.query_data(&query).unwrap();
 }
 
 pub mod tmp {
