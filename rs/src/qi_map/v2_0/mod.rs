@@ -280,42 +280,6 @@ impl super::QIMapReader for FileReader {
     ) -> Result<super::Metadata, super::QueryError> {
         self.inner.query_metadata(query)
     }
-
-    fn indexes(&mut self) -> Result<Vec<u32>, zip::result::ZipError> {
-        // index pattern: `^index/(\d+)/$`
-        const INDEX_PREFIX: &'static str = "index/";
-        const INDEX_PREFIX_LEN: usize = 6;
-        const MIN_INDEX_LEN: usize = 8;
-
-        let mut indexes = (0..self.inner.archive.len())
-            .into_par_iter()
-            .map_init(
-                {
-                    let metadata = self.inner.archive.metadata();
-                    let file_path = &self.file_path;
-                    move || {
-                        let file = fs::File::open(file_path).expect("could not open file");
-                        unsafe { zip::ZipArchive::unsafe_new_with_metadata(file, metadata.clone()) }
-                    }
-                },
-                |archive, idx| {
-                    let file = archive.by_index(idx).ok()?;
-                    let file_name = file.name();
-                    if file_name.len() < MIN_INDEX_LEN || !file_name.starts_with(INDEX_PREFIX) {
-                        return None;
-                    }
-
-                    file_name[INDEX_PREFIX_LEN..file_name.len() - 1]
-                        .parse::<u32>()
-                        .ok()
-                },
-            )
-            .filter_map(|index| index)
-            .collect::<Vec<_>>();
-
-        indexes.sort();
-        return Ok(indexes);
-    }
 }
 
 pub struct Reader<R> {
@@ -720,29 +684,6 @@ where
             super::MetadataQuery::Segment { index, segment } => todo!(),
             super::MetadataQuery::All => todo!(),
         }
-    }
-
-    fn indexes(&mut self) -> Result<Vec<u32>, zip::result::ZipError> {
-        // index pattern: `^index/(\d+)/$`
-        const INDEX_PREFIX: &'static str = "index/";
-        const INDEX_PREFIX_LEN: usize = 6;
-        const MIN_INDEX_LEN: usize = 8;
-
-        let mut indexes = Vec::with_capacity(self.archive.len());
-        for idx in 0..self.archive.len() {
-            let file = self.archive.by_index(idx)?;
-            let file_name = file.name();
-            if file_name.len() < MIN_INDEX_LEN || !file_name.starts_with(INDEX_PREFIX) {
-                continue;
-            }
-            let Ok(index) = file_name[INDEX_PREFIX_LEN..file_name.len() - 1].parse::<u32>() else {
-                continue;
-            };
-            indexes.push(index);
-        }
-
-        indexes.sort();
-        return Ok(indexes);
     }
 }
 impl<R> Reader<R>

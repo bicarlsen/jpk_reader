@@ -23,10 +23,6 @@ fn qi_map_reader() {
     let file = fs::File::open(&data_path).unwrap();
     let mut data = qi_map::Reader::new(file).unwrap();
 
-    let expected_indexes = (0..65_536).collect::<Vec<u32>>();
-    let indexes = data.indexes().unwrap();
-    assert_eq!(indexes, expected_indexes);
-
     let pixel = qi_map::Pixel::new(0, 0);
     let query = qi_map::DataQuery {
         index: qi_map::IndexQuery::Pixel(pixel.clone()),
@@ -64,10 +60,6 @@ fn qi_map_file_reader() {
         .join(DATA_FILE);
 
     let mut data = qi_map::FileReader::new(data_path).unwrap();
-
-    let expected_indexes = (0..65_536).collect::<Vec<u32>>();
-    let indexes = data.indexes().unwrap();
-    assert_eq!(indexes, expected_indexes);
 
     let pixel = qi_map::Pixel::new(0, 0);
     let query = qi_map::DataQuery {
