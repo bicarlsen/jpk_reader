@@ -17,6 +17,7 @@ const PROPERTIES_FILE_FORMAT_VERSION_KEY: &str = "file-format-version";
 pub trait QIMapReader {
     fn query_data(&mut self, query: &DataQuery) -> Result<Data, QueryError>;
     fn query_metadata(&mut self, query: &MetadataQuery) -> Result<Metadata, QueryError>;
+    fn indexes(&mut self) -> Result<Vec<u32>, zip::result::ZipError>;
 }
 
 pub struct Data {
@@ -412,6 +413,12 @@ impl QIMapReader for VersionedFileReader {
             VersionedFileReader::V2_0(reader) => reader.query_metadata(query),
         }
     }
+
+    fn indexes(&mut self) -> Result<Vec<u32>, zip::result::ZipError> {
+        match self {
+            VersionedFileReader::V2_0(reader) => reader.indexes(),
+        }
+    }
 }
 
 #[derive(derive_more::From)]
@@ -432,6 +439,12 @@ where
     fn query_metadata(&mut self, query: &MetadataQuery) -> Result<Metadata, QueryError> {
         match self {
             VersionedReader::V2_0(reader) => reader.query_metadata(query),
+        }
+    }
+
+    fn indexes(&mut self) -> Result<Vec<u32>, zip::result::ZipError> {
+        match self {
+            VersionedReader::V2_0(reader) => reader.indexes(),
         }
     }
 }
