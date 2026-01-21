@@ -33,6 +33,12 @@ impl QIMapReader {
         Ok(Self { inner: reader })
     }
 
+    fn indexes(&mut self) -> PyResult<Vec<u32>> {
+        self.inner
+            .indexes()
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))
+    }
+
     fn all_data(&mut self) -> PyResult<PyArrowType<RecordBatch>> {
         self.inner
             .query_data(&jpk::qi_map::DataQuery::select_all())

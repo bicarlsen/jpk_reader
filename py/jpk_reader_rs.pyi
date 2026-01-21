@@ -4,6 +4,13 @@ class QIMapReader:
     """A JPK QI Map data (`.jpk-qi-data`) reader."""
 
     def __init__(self, path: str) -> None: ...
+    def indexes(self) -> list[int]:
+        """Get all available indexes.
+
+        Returns:
+            list[int]: Available indexes.
+        """
+
     def all_data(self) -> pyarrow.RecordBatch:
         """Gets all data from the file.
 
