@@ -1,5 +1,8 @@
 use super::{IndexId, SegmentId, Value};
-use crate::properties::{self, Properties, PropertyError};
+use crate::{
+    properties::{self, Properties, PropertyError},
+    qi_map::v2_0::utils::SHARED_DATA_DIR,
+};
 use rayon::prelude::*;
 use std::{
     fmt, fs,
@@ -13,6 +16,11 @@ const PROPERTIES_DATA_FILE_KEY: &str = "jpk-data-file";
 const PROPERTIES_DATA_FILE_VALUE: &str = "spm-quantitative-image-data-file";
 const PROPERTIES_DATA_TYPE_KEY: &str = "type";
 const PROPERTIES_DATA_TYPE_VALUE: &str = "quantitative-imaging-map";
+
+#[derive(derive_more::Deref, Debug)]
+struct IndexProperties {
+    inner: Properties,
+}
 
 #[derive(derive_more::Deref, Debug)]
 struct SegmentProperties {
@@ -233,18 +241,18 @@ impl super::QIMapReader for FileReader {
                     };
 
                     let mut data_file = archive.by_path(&data_file_path).map_err(|error| {
-                        super::QueryError::Zip {
+                        super::QueryError::ZipFile {
                             path: data_file_path.clone(),
                             error,
                         }
                     })?;
                     let mut raw_data = Vec::with_capacity(data_file.size() as usize);
-                    data_file
-                        .read_to_end(&mut raw_data)
-                        .map_err(|err| super::QueryError::Zip {
+                    data_file.read_to_end(&mut raw_data).map_err(|err| {
+                        super::QueryError::ZipFile {
                             path: data_file_path.clone(),
                             error: zip::result::ZipError::Io(err),
-                        })?;
+                        }
+                    })?;
 
                     Ok((idx, raw_data, data_file_path, shared_data_index))
                 },
@@ -278,7 +286,13 @@ impl super::QIMapReader for FileReader {
         &mut self,
         query: &super::MetadataQuery,
     ) -> Result<super::Metadata, super::QueryError> {
-        self.inner.query_metadata(query)
+        match query {
+            super::MetadataQuery::All => todo!(),
+            super::MetadataQuery::Dataset => todo!(),
+            super::MetadataQuery::SharedData => todo!(),
+            super::MetadataQuery::Index(index_query) => todo!(),
+            super::MetadataQuery::Segment { index, segment } => todo!(),
+        }
     }
 }
 
@@ -353,7 +367,7 @@ where
                         ),
                     });
                 };
-                let Ok(min) = min.parse::<usize>() else {
+                let Ok(min) = min.parse::<IndexId>() else {
                     return Err(super::Error::InvalidFormat {
                         path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
                         cause: format!("invalid value of `{}`", DatasetProperties::INDEX_MIN_KEY),
@@ -369,7 +383,7 @@ where
                         ),
                     });
                 };
-                let Ok(max) = max.parse::<usize>() else {
+                let Ok(max) = max.parse::<IndexId>() else {
                     return Err(super::Error::InvalidFormat {
                         path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
                         cause: format!("invalid value of `{}`", DatasetProperties::INDEX_MAX_KEY),
@@ -577,17 +591,16 @@ where
                 PathBuf::from(path)
             };
 
-            let mut data_file =
-                self.archive
-                    .by_path(&data_file_path)
-                    .map_err(|error| super::QueryError::Zip {
-                        path: data_file_path.clone(),
-                        error,
-                    })?;
+            let mut data_file = self.archive.by_path(&data_file_path).map_err(|error| {
+                super::QueryError::ZipFile {
+                    path: data_file_path.clone(),
+                    error,
+                }
+            })?;
             let mut raw_data = Vec::with_capacity(data_file.size() as usize);
             data_file
                 .read_to_end(&mut raw_data)
-                .map_err(|err| super::QueryError::Zip {
+                .map_err(|err| super::QueryError::ZipFile {
                     path: data_file_path.clone(),
                     error: zip::result::ZipError::Io(err),
                 })?;
@@ -611,11 +624,133 @@ where
         query: &super::MetadataQuery,
     ) -> Result<super::Metadata, super::QueryError> {
         match query {
+            super::MetadataQuery::All => {
+                const INDEX_PREFIX: &str = "index/";
+                const SEGMENT_PREFIX: &str = "segments/";
+
+                let mut metadata = super::Metadata::with_capacity(self.archive.len() / 2);
+                for idx in 0..self.archive.len() {
+                    let mut file = self
+                        .archive
+                        .by_index(idx)
+                        .map_err(|err| super::QueryError::Zip(err))?;
+
+                    let index = if file.name() == super::PROPERTIES_FILE_PATH {
+                        super::MetadataIndex::Dataset
+                    } else if file.name()
+                        == format!("{}/{}", SHARED_DATA_DIR, super::PROPERTIES_FILE_PATH)
+                    {
+                        super::MetadataIndex::SharedData
+                    } else if file.name().ends_with(super::SEGMENT_PROPERTIES_FILE_PATH) {
+                        let Some((index_str, _)) =
+                            file.name()[INDEX_PREFIX.len()..].split_once("/")
+                        else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        let Ok(index) = index_str.parse::<IndexId>() else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        let Some(pixel) = self.dataset_info.position_pattern.index_to_pixel(index)
+                        else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        let Some((_, segment_str)) = file.name()
+                            [..file.name().len() - super::SEGMENT_PROPERTIES_FILE_PATH.len() - 1]
+                            .rsplit_once("/")
+                        else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        let Ok(segment) = segment_str.parse::<SegmentId>() else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        super::MetadataIndex::Segment { pixel, segment }
+                    } else if file.name().starts_with(INDEX_PREFIX)
+                        && file
+                            .name()
+                            .ends_with(&format!("/{}", super::PROPERTIES_FILE_PATH))
+                    {
+                        let Some((index_str, _)) =
+                            file.name()[INDEX_PREFIX.len()..].split_once("/")
+                        else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        let Ok(index) = index_str.parse::<IndexId>() else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        let Some(pixel) = self.dataset_info.position_pattern.index_to_pixel(index)
+                        else {
+                            return Err(super::QueryError::ZipFile {
+                                path: PathBuf::from(file.name()),
+                                error: zip::result::ZipError::InvalidArchive(
+                                    std::borrow::Cow::Borrowed("invalid file path"),
+                                ),
+                            });
+                        };
+
+                        super::MetadataIndex::Pixel(pixel)
+                    } else {
+                        continue;
+                    };
+
+                    let properties = super::Properties::new(&mut file).map_err(|_| {
+                        super::QueryError::InvalidFormat {
+                            path: PathBuf::from(file.name()),
+                            cause: "file could not be read as properties".to_string(),
+                        }
+                    })?;
+
+                    metadata.push(index, properties);
+                }
+
+                Ok(metadata)
+            }
             super::MetadataQuery::Dataset => {
                 let mut properties = self
                     .archive
                     .by_path(utils::DATASET_PROPERTIES_FILE)
-                    .map_err(|error| super::QueryError::Zip {
+                    .map_err(|error| super::QueryError::ZipFile {
                         path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
                         error,
                     })?;
@@ -629,18 +764,17 @@ where
 
                 let idx = vec![super::MetadataIndex::Dataset];
                 let data = vec![properties];
-                Ok(super::Metadata::new(idx, data).unwrap())
+                Ok(super::Metadata::from(idx, data).unwrap())
             }
 
             super::MetadataQuery::SharedData => {
                 let data_path = utils::shared_data_properties_path();
-                let mut properties =
-                    self.archive
-                        .by_path(&data_path)
-                        .map_err(|error| super::QueryError::Zip {
-                            path: data_path.clone(),
-                            error,
-                        })?;
+                let mut properties = self.archive.by_path(&data_path).map_err(|error| {
+                    super::QueryError::ZipFile {
+                        path: data_path.clone(),
+                        error,
+                    }
+                })?;
 
                 let properties = Properties::new(&mut properties).map_err(|_| {
                     super::QueryError::InvalidFormat {
@@ -651,7 +785,7 @@ where
 
                 let idx = vec![super::MetadataIndex::SharedData];
                 let data = vec![properties];
-                Ok(super::Metadata::new(idx, data).unwrap())
+                Ok(super::Metadata::from(idx, data).unwrap())
             }
 
             super::MetadataQuery::Index(query) => match query {
@@ -664,7 +798,7 @@ where
                     };
                     let data_path = utils::index_properties_path(index);
                     let mut properties = self.archive.by_path(&data_path).map_err(|error| {
-                        super::QueryError::Zip {
+                        super::QueryError::ZipFile {
                             path: data_path.clone(),
                             error,
                         }
@@ -678,11 +812,10 @@ where
 
                     let idx = vec![super::MetadataIndex::Pixel(pixel.clone())];
                     let data = vec![properties];
-                    Ok(super::Metadata::new(idx, data).unwrap())
+                    Ok(super::Metadata::from(idx, data).unwrap())
                 }
             },
             super::MetadataQuery::Segment { index, segment } => todo!(),
-            super::MetadataQuery::All => todo!(),
         }
     }
 }
@@ -734,7 +867,7 @@ pub struct DatasetInfo {
 }
 
 enum Index {
-    Range { min: usize, max: usize },
+    Range { min: IndexId, max: IndexId },
 }
 
 struct PositionPattern {
@@ -764,11 +897,11 @@ impl PositionPattern {
     pub fn pixel_to_index(&self, pixel: &super::Pixel) -> Option<IndexId> {
         match &self.kind {
             PositionPatternType::Grid(grid) => {
-                if pixel.i >= grid.i_length as usize || pixel.j >= grid.j_length as usize {
+                if pixel.i >= grid.i_length as IndexId || pixel.j >= grid.j_length as IndexId {
                     return None;
                 }
 
-                Some(pixel.j * grid.i_length as usize + pixel.i)
+                Some(pixel.j * grid.i_length as IndexId + pixel.i)
             }
         }
     }
@@ -778,11 +911,11 @@ impl PositionPattern {
     pub fn index_to_pixel(&self, index: IndexId) -> Option<super::Pixel> {
         match &self.kind {
             PositionPatternType::Grid(grid) => {
-                let y = index / grid.i_length as usize;
-                if y >= grid.j_length as usize {
+                let y = index / grid.i_length as IndexId;
+                if y >= grid.j_length as IndexId {
                     return None;
                 }
-                let x = index % grid.i_length as usize;
+                let x = index % grid.i_length as IndexId;
                 return Some(super::Pixel { i: x, j: y });
             }
         }
@@ -956,7 +1089,7 @@ mod utils {
         let mut file =
             archive
                 .by_path(&index_properties_path)
-                .map_err(|error| QueryError::Zip {
+                .map_err(|error| QueryError::ZipFile {
                     path: index_properties_path.clone(),
                     error,
                 })?;
@@ -992,7 +1125,7 @@ mod utils {
         let mut properties =
             archive
                 .by_path(&segment_properties_path)
-                .map_err(|error| QueryError::Zip {
+                .map_err(|error| QueryError::ZipFile {
                     path: segment_properties_path.clone(),
                     error,
                 })?;

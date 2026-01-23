@@ -2,12 +2,13 @@ use jpk_reader::qi_map::{self, QIMapReader};
 use std::{fs, path::PathBuf};
 
 const DATA_DIR: &str = "../data/qi_data";
-const DATA_FILE: &str = "qi_data-2_0-lg.jpk-qi-data";
+const DATA_FILE_LG: &str = "qi_data-2_0-lg.jpk-qi-data";
+const DATA_FILE_SM: &str = "qi_data-sm.jpk-qi-data";
 #[test]
 fn qi_map_file_reader_format_version() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
-        .join(DATA_FILE);
+        .join(DATA_FILE_LG);
 
     let version_str = qi_map::FileReader::format_version(data_path).unwrap();
     let version = qi_map::FormatVersion::from_str(version_str).unwrap();
@@ -18,7 +19,7 @@ fn qi_map_file_reader_format_version() {
 fn qi_map_reader() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
-        .join(DATA_FILE);
+        .join(DATA_FILE_LG);
 
     let file = fs::File::open(&data_path).unwrap();
     let mut data = qi_map::Reader::new(file).unwrap();
@@ -36,6 +37,23 @@ fn qi_map_reader() {
     let idx = qi_map::DataIndex::new(pixel.clone(), 0, "smoothedMeasuredHeight");
     let values = result.get(&idx).unwrap();
 
+    // long running test
+    // let query = qi_map::DataQuery::select_all();
+    // let all = data.query_data(&query).unwrap();
+}
+
+#[test]
+fn qi_map_reader_v2_query_metadata() {
+    let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(DATA_DIR)
+        .join(DATA_FILE_LG);
+
+    let file = fs::File::open(&data_path).unwrap();
+    let mut data = qi_map::Reader::new(file).unwrap();
+
+    let query = qi_map::MetadataQuery::All;
+    let result = data.query_metadata(&query).unwrap();
+
     let query = qi_map::MetadataQuery::Dataset;
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
@@ -44,20 +62,17 @@ fn qi_map_reader() {
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
 
-    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel.clone()));
+    let pixel = qi_map::Pixel::new(0, 0);
+    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel));
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
-
-    // long running test
-    // let query = qi_map::DataQuery::select_all();
-    // let all = data.query_data(&query).unwrap();
 }
 
 #[test]
 fn qi_map_file_reader() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
-        .join(DATA_FILE);
+        .join(DATA_FILE_LG);
 
     let mut data = qi_map::FileReader::new(data_path).unwrap();
 

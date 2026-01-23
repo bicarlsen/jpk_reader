@@ -89,6 +89,12 @@ impl QIMapReader {
             })
     }
 
+    fn all_metadata(&mut self) -> PyResult {
+        self.inner
+            .query_metadata(&jpk_reader::qi_map::MetadataQuery::All)
+            .map_err(|err| PyRuntimeError::new_err(err.to_string()))
+    }
+
     // fn query_data(&mut self, index: jpk::qi_map::IndexQuery, segment: jpk::qi_map::SegmentQuery, channel: jpk::qi_map::ChannelQuery) ->
     // PyResult<PyArrowType<arrow::array::StructArray>> {
     // }

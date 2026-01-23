@@ -7,11 +7,12 @@ use std::{
 mod v2_0;
 
 type Value = f64;
-type IndexId = usize;
+type IndexId = u32;
 type SegmentId = u8;
 type ChannelId = String;
 
 const PROPERTIES_FILE_PATH: &str = "header.properties";
+const SEGMENT_PROPERTIES_FILE_PATH: &str = "segment-header.properties";
 const PROPERTIES_FILE_FORMAT_VERSION_KEY: &str = "file-format-version";
 
 pub trait QIMapReader {
@@ -60,13 +61,28 @@ impl Data {
     }
 }
 
+#[derive(Debug)]
 pub struct Metadata {
     indices: Vec<MetadataIndex>,
     data: Vec<Properties>,
 }
 
 impl Metadata {
-    pub fn new(
+    pub fn new() -> Self {
+        Self {
+            indices: Vec::new(),
+            data: Vec::new(),
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            indices: Vec::with_capacity(capacity),
+            data: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn from(
         indices: Vec<MetadataIndex>,
         data: Vec<Properties>,
     ) -> Result<Self, InvalidDataIndices> {
@@ -96,6 +112,11 @@ impl Metadata {
     pub fn get(&self, index: &MetadataIndex) -> Option<&Properties> {
         let idx = self.indices.binary_search(index).ok()?;
         Some(&self.data[idx])
+    }
+
+    pub fn push(&mut self, index: MetadataIndex, data: Properties) {
+        self.indices.push(index);
+        self.data.push(data)
     }
 }
 
@@ -155,7 +176,7 @@ pub enum MetadataIndex {
     Dataset,
     SharedData,
     Pixel(Pixel),
-    Segment { index: IndexId, segment: SegmentId },
+    Segment { pixel: Pixel, segment: SegmentId },
 }
 
 impl PartialOrd for MetadataIndex {
@@ -185,11 +206,11 @@ impl PartialOrd for MetadataIndex {
 
             (
                 MetadataIndex::Segment {
-                    index: idx_a,
+                    pixel: idx_a,
                     segment: segment_a,
                 },
                 MetadataIndex::Segment {
-                    index: idx_b,
+                    pixel: idx_b,
                     segment: segment_b,
                 },
             ) => {
@@ -359,8 +380,10 @@ pub enum QueryError {
     /// The pixel coordinate is invalid.
     OutOfBounds(Pixel),
 
+    Zip(zip::result::ZipError),
+
     /// Error reading the zip archive.
-    Zip {
+    ZipFile {
         path: PathBuf,
         error: zip::result::ZipError,
     },
