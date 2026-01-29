@@ -16,11 +16,10 @@ fn qi_map_file_reader_format_version() {
 }
 
 #[test]
-fn qi_map_reader() {
+fn qi_map_reader_query_data() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
-
     let file = fs::File::open(&data_path).unwrap();
     let mut data = qi_map::Reader::new(file).unwrap();
 
@@ -43,11 +42,10 @@ fn qi_map_reader() {
 }
 
 #[test]
-fn qi_map_reader_v2_query_metadata() {
+fn qi_map_reader_query_metadata() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
-
     let file = fs::File::open(&data_path).unwrap();
     let mut data = qi_map::Reader::new(file).unwrap();
 
@@ -69,11 +67,10 @@ fn qi_map_reader_v2_query_metadata() {
 }
 
 #[test]
-fn qi_map_file_reader() {
+fn qi_map_file_reader_query_data() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
-
     let mut data = qi_map::FileReader::new(data_path).unwrap();
 
     let pixel = qi_map::Pixel::new(0, 0);
@@ -89,6 +86,20 @@ fn qi_map_file_reader() {
     let idx = qi_map::DataIndex::new(pixel.clone(), 0, "smoothedMeasuredHeight");
     let values = result.get(&idx).unwrap();
 
+    let query = qi_map::DataQuery::select_all();
+    let all = data.query_data(&query).unwrap();
+}
+
+#[test]
+fn qi_map_file_reader_query_metadata() {
+    let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(DATA_DIR)
+        .join(DATA_FILE_LG);
+    let mut data = qi_map::FileReader::new(data_path).unwrap();
+
+    let query = qi_map::MetadataQuery::All;
+    let result = data.query_metadata(&query).unwrap();
+
     let query = qi_map::MetadataQuery::Dataset;
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
@@ -97,12 +108,10 @@ fn qi_map_file_reader() {
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
 
-    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel.clone()));
+    let pixel = qi_map::Pixel::new(0, 0);
+    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel));
     let result = data.query_metadata(&query).unwrap();
     assert_eq!(result.len(), 1);
-
-    let query = qi_map::DataQuery::select_all();
-    let all = data.query_data(&query).unwrap();
 }
 
 pub mod tmp {

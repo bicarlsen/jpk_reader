@@ -120,6 +120,13 @@ impl Metadata {
     }
 }
 
+impl From<Vec<(MetadataIndex, Properties)>> for Metadata {
+    fn from(value: Vec<(MetadataIndex, Properties)>) -> Self {
+        let (indices, data) = value.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+        Self { indices, data }
+    }
+}
+
 /// Indices size does not match data size.
 #[derive(Debug)]
 pub struct InvalidDataIndices;

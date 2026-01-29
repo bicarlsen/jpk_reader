@@ -5,7 +5,8 @@ use crate::{
 };
 use rayon::prelude::*;
 use std::{
-    fmt, fs,
+    fmt,
+    fs::{self, File},
     io::{self, Read},
     path::PathBuf,
 };
@@ -287,12 +288,68 @@ impl super::QIMapReader for FileReader {
         query: &super::MetadataQuery,
     ) -> Result<super::Metadata, super::QueryError> {
         match query {
-            super::MetadataQuery::All => todo!(),
-            super::MetadataQuery::Dataset => todo!(),
-            super::MetadataQuery::SharedData => todo!(),
-            super::MetadataQuery::Index(index_query) => todo!(),
+            super::MetadataQuery::All => self.metadata_all(),
+            super::MetadataQuery::Dataset => self.inner.metadata_dataset(),
+            super::MetadataQuery::SharedData => self.inner.metadata_shared(),
+            super::MetadataQuery::Index(index_query) => match index_query {
+                super::IndexQuery::All => todo!(),
+                super::IndexQuery::PixelRect(pixel_rect) => todo!(),
+                super::IndexQuery::Pixel(pixel) => self.inner.metadata_index_pixel(pixel),
+            },
             super::MetadataQuery::Segment { index, segment } => todo!(),
         }
+    }
+}
+
+impl FileReader {
+    fn metadata_all(&mut self) -> Result<super::Metadata, super::QueryError> {
+        let properties = (0..self.inner.archive.len())
+            .into_par_iter()
+            .map_init(
+                {
+                    let metadata = self.inner.archive.metadata();
+                    let file_path = &self.file_path;
+                    move || {
+                        let file = fs::File::open(file_path).expect("could not open file");
+                        unsafe { zip::ZipArchive::unsafe_new_with_metadata(file, metadata.clone()) }
+                    }
+                },
+                |archive, idx| {
+                    let mut file = archive
+                        .by_index(idx)
+                        .map_err(|err| super::QueryError::Zip(err))?;
+
+                    metadata_index_from_file_path(
+                        file.name(),
+                        &self.inner.dataset_info.position_pattern,
+                    )
+                    .map_err(|err| super::QueryError::ZipFile {
+                        path: PathBuf::from(file.name()),
+                        error: err,
+                    })
+                    .map(|maybe_index| {
+                        maybe_index
+                            .map(|index| {
+                                super::Properties::new(&mut file)
+                                    .map(|property| (index, property))
+                                    .map_err(|_| super::QueryError::InvalidFormat {
+                                        path: PathBuf::from(file.name()),
+                                        cause: "file could not be read as properties".to_string(),
+                                    })
+                            })
+                            .transpose()
+                    })
+                    .flatten()
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let metadata = properties
+            .into_iter()
+            .filter_map(|index| index)
+            .collect::<Vec<_>>();
+
+        Ok(metadata.into())
     }
 }
 
@@ -624,201 +681,19 @@ where
         query: &super::MetadataQuery,
     ) -> Result<super::Metadata, super::QueryError> {
         match query {
-            super::MetadataQuery::All => {
-                const INDEX_PREFIX: &str = "index/";
-                const SEGMENT_PREFIX: &str = "segments/";
-
-                let mut metadata = super::Metadata::with_capacity(self.archive.len() / 2);
-                for idx in 0..self.archive.len() {
-                    let mut file = self
-                        .archive
-                        .by_index(idx)
-                        .map_err(|err| super::QueryError::Zip(err))?;
-
-                    let index = if file.name() == super::PROPERTIES_FILE_PATH {
-                        super::MetadataIndex::Dataset
-                    } else if file.name()
-                        == format!("{}/{}", SHARED_DATA_DIR, super::PROPERTIES_FILE_PATH)
-                    {
-                        super::MetadataIndex::SharedData
-                    } else if file.name().ends_with(super::SEGMENT_PROPERTIES_FILE_PATH) {
-                        let Some((index_str, _)) =
-                            file.name()[INDEX_PREFIX.len()..].split_once("/")
-                        else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        let Ok(index) = index_str.parse::<IndexId>() else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        let Some(pixel) = self.dataset_info.position_pattern.index_to_pixel(index)
-                        else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        let Some((_, segment_str)) = file.name()
-                            [..file.name().len() - super::SEGMENT_PROPERTIES_FILE_PATH.len() - 1]
-                            .rsplit_once("/")
-                        else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        let Ok(segment) = segment_str.parse::<SegmentId>() else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        super::MetadataIndex::Segment { pixel, segment }
-                    } else if file.name().starts_with(INDEX_PREFIX)
-                        && file
-                            .name()
-                            .ends_with(&format!("/{}", super::PROPERTIES_FILE_PATH))
-                    {
-                        let Some((index_str, _)) =
-                            file.name()[INDEX_PREFIX.len()..].split_once("/")
-                        else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        let Ok(index) = index_str.parse::<IndexId>() else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        let Some(pixel) = self.dataset_info.position_pattern.index_to_pixel(index)
-                        else {
-                            return Err(super::QueryError::ZipFile {
-                                path: PathBuf::from(file.name()),
-                                error: zip::result::ZipError::InvalidArchive(
-                                    std::borrow::Cow::Borrowed("invalid file path"),
-                                ),
-                            });
-                        };
-
-                        super::MetadataIndex::Pixel(pixel)
-                    } else {
-                        continue;
-                    };
-
-                    let properties = super::Properties::new(&mut file).map_err(|_| {
-                        super::QueryError::InvalidFormat {
-                            path: PathBuf::from(file.name()),
-                            cause: "file could not be read as properties".to_string(),
-                        }
-                    })?;
-
-                    metadata.push(index, properties);
-                }
-
-                Ok(metadata)
-            }
-            super::MetadataQuery::Dataset => {
-                let mut properties = self
-                    .archive
-                    .by_path(utils::DATASET_PROPERTIES_FILE)
-                    .map_err(|error| super::QueryError::ZipFile {
-                        path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
-                        error,
-                    })?;
-
-                let properties = Properties::new(&mut properties).map_err(|_| {
-                    super::QueryError::InvalidFormat {
-                        path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
-                        cause: "file could not be read as properties".to_string(),
-                    }
-                })?;
-
-                let idx = vec![super::MetadataIndex::Dataset];
-                let data = vec![properties];
-                Ok(super::Metadata::from(idx, data).unwrap())
-            }
-
-            super::MetadataQuery::SharedData => {
-                let data_path = utils::shared_data_properties_path();
-                let mut properties = self.archive.by_path(&data_path).map_err(|error| {
-                    super::QueryError::ZipFile {
-                        path: data_path.clone(),
-                        error,
-                    }
-                })?;
-
-                let properties = Properties::new(&mut properties).map_err(|_| {
-                    super::QueryError::InvalidFormat {
-                        path: data_path.clone(),
-                        cause: "file could not be read as properties".to_string(),
-                    }
-                })?;
-
-                let idx = vec![super::MetadataIndex::SharedData];
-                let data = vec![properties];
-                Ok(super::Metadata::from(idx, data).unwrap())
-            }
-
+            super::MetadataQuery::All => self.metadata_all(),
+            super::MetadataQuery::Dataset => self.metadata_dataset(),
+            super::MetadataQuery::SharedData => self.metadata_shared(),
             super::MetadataQuery::Index(query) => match query {
                 super::IndexQuery::All => todo!(),
                 super::IndexQuery::PixelRect(rect) => todo!(),
-                super::IndexQuery::Pixel(pixel) => {
-                    let Some(index) = self.dataset_info.position_pattern.pixel_to_index(pixel)
-                    else {
-                        return Err(super::QueryError::OutOfBounds(pixel.clone()));
-                    };
-                    let data_path = utils::index_properties_path(index);
-                    let mut properties = self.archive.by_path(&data_path).map_err(|error| {
-                        super::QueryError::ZipFile {
-                            path: data_path.clone(),
-                            error,
-                        }
-                    })?;
-                    let properties = Properties::new(&mut properties).map_err(|_| {
-                        super::QueryError::InvalidFormat {
-                            path: data_path.clone(),
-                            cause: "file could not be read as properties".to_string(),
-                        }
-                    })?;
-
-                    let idx = vec![super::MetadataIndex::Pixel(pixel.clone())];
-                    let data = vec![properties];
-                    Ok(super::Metadata::from(idx, data).unwrap())
-                }
+                super::IndexQuery::Pixel(pixel) => self.metadata_index_pixel(pixel),
             },
             super::MetadataQuery::Segment { index, segment } => todo!(),
         }
     }
 }
+
 impl<R> Reader<R>
 where
     R: io::Read + io::Seek,
@@ -851,6 +726,182 @@ where
                 Ok(vec![idx])
             }
         }
+    }
+}
+
+impl<R> Reader<R>
+where
+    R: io::Read + io::Seek,
+{
+    fn metadata_all(&mut self) -> Result<super::Metadata, super::QueryError> {
+        let mut metadata = super::Metadata::with_capacity(self.archive.len() / 2);
+        for idx in 0..self.archive.len() {
+            let mut file = self
+                .archive
+                .by_index(idx)
+                .map_err(|err| super::QueryError::Zip(err))?;
+
+            let index =
+                metadata_index_from_file_path(file.name(), &self.dataset_info.position_pattern)
+                    .map_err(|err| super::QueryError::ZipFile {
+                        path: PathBuf::from(file.name()),
+                        error: err,
+                    })?;
+            let Some(index) = index else {
+                continue;
+            };
+
+            let properties = super::Properties::new(&mut file).map_err(|_| {
+                super::QueryError::InvalidFormat {
+                    path: PathBuf::from(file.name()),
+                    cause: "file could not be read as properties".to_string(),
+                }
+            })?;
+
+            metadata.push(index, properties);
+        }
+
+        Ok(metadata)
+    }
+
+    fn metadata_dataset(&mut self) -> Result<super::Metadata, super::QueryError> {
+        let mut properties = self
+            .archive
+            .by_path(utils::DATASET_PROPERTIES_FILE)
+            .map_err(|error| super::QueryError::ZipFile {
+                path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
+                error,
+            })?;
+
+        let properties =
+            Properties::new(&mut properties).map_err(|_| super::QueryError::InvalidFormat {
+                path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
+                cause: "file could not be read as properties".to_string(),
+            })?;
+
+        let idx = vec![super::MetadataIndex::Dataset];
+        let data = vec![properties];
+        Ok(super::Metadata::from(idx, data).unwrap())
+    }
+
+    fn metadata_shared(&mut self) -> Result<super::Metadata, super::QueryError> {
+        let data_path = utils::shared_data_properties_path();
+        let mut properties =
+            self.archive
+                .by_path(&data_path)
+                .map_err(|error| super::QueryError::ZipFile {
+                    path: data_path.clone(),
+                    error,
+                })?;
+
+        let properties =
+            Properties::new(&mut properties).map_err(|_| super::QueryError::InvalidFormat {
+                path: data_path.clone(),
+                cause: "file could not be read as properties".to_string(),
+            })?;
+
+        let idx = vec![super::MetadataIndex::SharedData];
+        let data = vec![properties];
+        Ok(super::Metadata::from(idx, data).unwrap())
+    }
+
+    fn metadata_index_pixel(
+        &mut self,
+        pixel: &super::Pixel,
+    ) -> Result<super::Metadata, super::QueryError> {
+        let Some(index) = self.dataset_info.position_pattern.pixel_to_index(pixel) else {
+            return Err(super::QueryError::OutOfBounds(pixel.clone()));
+        };
+        let data_path = utils::index_properties_path(index);
+        let mut properties =
+            self.archive
+                .by_path(&data_path)
+                .map_err(|error| super::QueryError::ZipFile {
+                    path: data_path.clone(),
+                    error,
+                })?;
+        let properties =
+            Properties::new(&mut properties).map_err(|_| super::QueryError::InvalidFormat {
+                path: data_path.clone(),
+                cause: "file could not be read as properties".to_string(),
+            })?;
+
+        let idx = vec![super::MetadataIndex::Pixel(pixel.clone())];
+        let data = vec![properties];
+        Ok(super::Metadata::from(idx, data).unwrap())
+    }
+}
+
+fn metadata_index_from_file_path(
+    filename: &str,
+    position_pattern: &PositionPattern,
+) -> Result<Option<super::MetadataIndex>, zip::result::ZipError> {
+    const INDEX_PREFIX: &str = "index/";
+    const SEGMENT_PREFIX: &str = "segments/";
+
+    if filename == super::PROPERTIES_FILE_PATH {
+        return Ok(Some(super::MetadataIndex::Dataset));
+    } else if filename == format!("{}/{}", SHARED_DATA_DIR, super::PROPERTIES_FILE_PATH) {
+        return Ok(Some(super::MetadataIndex::SharedData));
+    } else if filename.ends_with(super::SEGMENT_PROPERTIES_FILE_PATH) {
+        let Some((index_str, _)) = filename[INDEX_PREFIX.len()..].split_once("/") else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        let Ok(index) = index_str.parse::<IndexId>() else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        let Some(pixel) = position_pattern.index_to_pixel(index) else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        let Some((_, segment_str)) = filename
+            [..filename.len() - super::SEGMENT_PROPERTIES_FILE_PATH.len() - 1]
+            .rsplit_once("/")
+        else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        let Ok(segment) = segment_str.parse::<SegmentId>() else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        return Ok(Some(super::MetadataIndex::Segment { pixel, segment }));
+    } else if filename.starts_with(INDEX_PREFIX)
+        && filename.ends_with(&format!("/{}", super::PROPERTIES_FILE_PATH))
+    {
+        let Some((index_str, _)) = filename[INDEX_PREFIX.len()..].split_once("/") else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        let Ok(index) = index_str.parse::<IndexId>() else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        let Some(pixel) = position_pattern.index_to_pixel(index) else {
+            return Err(zip::result::ZipError::InvalidArchive(
+                std::borrow::Cow::Borrowed("invalid file path"),
+            ));
+        };
+
+        return Ok(Some(super::MetadataIndex::Pixel(pixel)));
+    } else {
+        return Ok(None);
     }
 }
 
