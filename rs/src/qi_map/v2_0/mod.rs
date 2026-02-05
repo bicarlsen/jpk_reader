@@ -1,4 +1,4 @@
-use super::{IndexId, SegmentId, Value};
+use super::{IndexType, SegmentType, Value};
 use crate::{
     properties::{self, Properties, PropertyError},
     qi_map::v2_0::utils::SHARED_DATA_DIR,
@@ -202,20 +202,13 @@ impl super::QIMapReader for FileReader {
         let data_idx = data_idx
             .into_iter()
             .flatten()
-            .map(|((idx, segment, channel), channel_data)| {
-                let pixel = self
-                    .inner
-                    .dataset_info
-                    .position_pattern
-                    .index_to_pixel(idx)
-                    .expect("pixel to be valid");
+            .map(|((index, segment, channel), channel_data)| {
                 (
                     super::DataIndex {
-                        pixel,
+                        index,
                         segment,
                         channel,
                     },
-                    idx,
                     channel_data.shared_data_index(),
                     channel_data.file_path().clone(),
                 )
@@ -233,9 +226,9 @@ impl super::QIMapReader for FileReader {
                         unsafe { zip::ZipArchive::unsafe_new_with_metadata(file, metadata.clone()) }
                     }
                 },
-                |archive, (idx, index, shared_data_index, file_path)| {
+                |archive, (idx, shared_data_index, file_path)| {
                     let data_file_path = {
-                        let path = utils::index_segment_path(index, idx.segment);
+                        let path = utils::index_segment_path(idx.index, idx.segment);
                         let path =
                             format!("{}/{}", path.to_string_lossy(), file_path.to_string_lossy());
                         PathBuf::from(path)
@@ -292,11 +285,18 @@ impl super::QIMapReader for FileReader {
             super::MetadataQuery::Dataset => self.inner.metadata_dataset(),
             super::MetadataQuery::SharedData => self.inner.metadata_shared(),
             super::MetadataQuery::Index(index_query) => match index_query {
-                super::IndexQuery::All => todo!(),
-                super::IndexQuery::PixelRect(pixel_rect) => todo!(),
+                super::IndexQuery::All => todo!("FileReader::query_metadata(IndexQuery::All)"),
+                super::IndexQuery::Index(index) => {
+                    todo!("FileReader::query_metadata(IndexQuery::Index)")
+                }
+                super::IndexQuery::PixelRect(pixel_rect) => {
+                    todo!("FileReader::query_metadata(IndexQuery::PixelRect)")
+                }
                 super::IndexQuery::Pixel(pixel) => self.inner.metadata_index_pixel(pixel),
             },
-            super::MetadataQuery::Segment { index, segment } => todo!(),
+            super::MetadataQuery::Segment { index, segment } => {
+                todo!("FileReader::query_metadata(SegmentQuery)")
+            }
         }
     }
 }
@@ -344,12 +344,22 @@ impl FileReader {
             )
             .collect::<Result<Vec<_>, _>>()?;
 
-        let metadata = properties
+        let (indices, data) = properties
             .into_iter()
             .filter_map(|index| index)
-            .collect::<Vec<_>>();
+            .unzip::<_, _, Vec<_>, Vec<_>>();
 
-        Ok(metadata.into())
+        Ok(super::Metadata::from_parts(indices, data).expect("indices and data are compatible"))
+    }
+}
+
+impl crate::ArchiveReader for FileReader {
+    fn files(&self) -> Vec<&str> {
+        self.inner.files()
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
     }
 }
 
@@ -424,7 +434,7 @@ where
                         ),
                     });
                 };
-                let Ok(min) = min.parse::<IndexId>() else {
+                let Ok(min) = min.parse::<IndexType>() else {
                     return Err(super::Error::InvalidFormat {
                         path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
                         cause: format!("invalid value of `{}`", DatasetProperties::INDEX_MIN_KEY),
@@ -440,7 +450,7 @@ where
                         ),
                     });
                 };
-                let Ok(max) = max.parse::<IndexId>() else {
+                let Ok(max) = max.parse::<IndexType>() else {
                     return Err(super::Error::InvalidFormat {
                         path: PathBuf::from(utils::DATASET_PROPERTIES_FILE),
                         cause: format!("invalid value of `{}`", DatasetProperties::INDEX_MAX_KEY),
@@ -518,8 +528,8 @@ where
 {
     pub fn get_data_index_segment_channel(
         &mut self,
-        index: IndexId,
-        segment: SegmentId,
+        index: IndexType,
+        segment: SegmentType,
         channel: impl fmt::Display,
     ) -> Result<Vec<Value>, DataError> {
         let segment_properties_path = utils::index_segment_properties_path(index, segment);
@@ -597,8 +607,8 @@ where
     fn query_data(&mut self, query: &super::DataQuery) -> Result<super::Data, super::QueryError> {
         let indices = self._data_query_indices(query)?;
         let mut data_idx = Vec::with_capacity(indices.len());
-        for idx in indices {
-            let index_data = utils::index_data(&mut self.archive, idx)?;
+        for index in indices {
+            let index_data = utils::index_data(&mut self.archive, index)?;
             let segments = match &query.segment {
                 super::SegmentQuery::All => (0..index_data.segment_count()).collect::<Vec<_>>(),
                 super::SegmentQuery::Indices(indices) => indices.clone(),
@@ -606,8 +616,8 @@ where
 
             for segment in segments {
                 let segment_properties =
-                    utils::segment_properties(&mut self.archive, idx, segment)?;
-                let segment_data = utils::segment_data(&segment_properties, idx)?;
+                    utils::segment_properties(&mut self.archive, index, segment)?;
+                let segment_data = utils::segment_data(&segment_properties, index)?;
                 let channels = match &query.channel {
                     super::ChannelQuery::All => segment_data.channels().clone(),
                     super::ChannelQuery::Include(channels) => {
@@ -619,19 +629,15 @@ where
 
                 for channel in channels {
                     let channel_data =
-                        utils::channel_data(&segment_properties, &channel, idx, segment)?;
-                    let pixel = self
-                        .dataset_info
-                        .position_pattern
-                        .index_to_pixel(idx)
-                        .expect("pixel to be valid");
+                        utils::channel_data(&segment_properties, &channel, index, segment)?;
+
                     data_idx.push((
                         super::DataIndex {
-                            pixel,
+                            index,
                             segment,
                             channel,
                         },
-                        idx,
+                        index,
                         channel_data.shared_data_index(),
                         channel_data.file_path().clone(),
                     ))
@@ -685,12 +691,32 @@ where
             super::MetadataQuery::Dataset => self.metadata_dataset(),
             super::MetadataQuery::SharedData => self.metadata_shared(),
             super::MetadataQuery::Index(query) => match query {
-                super::IndexQuery::All => todo!(),
-                super::IndexQuery::PixelRect(rect) => todo!(),
+                super::IndexQuery::All => todo!("Reader::query_metadata(IndexQuery::All)"),
+                super::IndexQuery::Index(index) => {
+                    todo!("Reader::query_metadata(IndexQuery::Index)")
+                }
+                super::IndexQuery::PixelRect(rect) => {
+                    todo!("Reader::query_metadata(IndexQuery::PixelRect)")
+                }
                 super::IndexQuery::Pixel(pixel) => self.metadata_index_pixel(pixel),
             },
-            super::MetadataQuery::Segment { index, segment } => todo!(),
+            super::MetadataQuery::Segment { index, segment } => {
+                todo!("Reader::query_metadata(SegmentQuery)")
+            }
         }
+    }
+}
+
+impl<R> crate::ArchiveReader for Reader<R>
+where
+    R: io::Read + io::Seek,
+{
+    fn files(&self) -> Vec<&str> {
+        self.archive.file_names().collect()
+    }
+
+    fn len(&self) -> usize {
+        self.archive.len()
     }
 }
 
@@ -701,11 +727,13 @@ where
     fn _data_query_indices(
         &mut self,
         query: &super::DataQuery,
-    ) -> Result<Vec<IndexId>, super::QueryError> {
+    ) -> Result<Vec<IndexType>, super::QueryError> {
         match &query.index {
             super::IndexQuery::All => match self.dataset_info.index {
                 Index::Range { min, max } => Ok((min..=max).collect::<Vec<_>>()),
             },
+
+            super::IndexQuery::Index(index) => Ok(vec![*index]),
 
             super::IndexQuery::PixelRect(rect) => rect
                 .iter()
@@ -758,7 +786,7 @@ where
                 }
             })?;
 
-            metadata.push(index, properties);
+            metadata.insert(index, properties);
         }
 
         Ok(metadata)
@@ -779,9 +807,9 @@ where
                 cause: "file could not be read as properties".to_string(),
             })?;
 
-        let idx = vec![super::MetadataIndex::Dataset];
+        let indices = vec![super::MetadataIndex::Dataset];
         let data = vec![properties];
-        Ok(super::Metadata::from(idx, data).unwrap())
+        Ok(super::Metadata::from_parts(indices, data).unwrap())
     }
 
     fn metadata_shared(&mut self) -> Result<super::Metadata, super::QueryError> {
@@ -800,9 +828,9 @@ where
                 cause: "file could not be read as properties".to_string(),
             })?;
 
-        let idx = vec![super::MetadataIndex::SharedData];
+        let indices = vec![super::MetadataIndex::SharedData];
         let data = vec![properties];
-        Ok(super::Metadata::from(idx, data).unwrap())
+        Ok(super::Metadata::from_parts(indices, data).unwrap())
     }
 
     fn metadata_index_pixel(
@@ -826,9 +854,9 @@ where
                 cause: "file could not be read as properties".to_string(),
             })?;
 
-        let idx = vec![super::MetadataIndex::Pixel(pixel.clone())];
+        let idx = vec![super::MetadataIndex::Index(index)];
         let data = vec![properties];
-        Ok(super::Metadata::from(idx, data).unwrap())
+        Ok(super::Metadata::from_parts(idx, data).unwrap())
     }
 }
 
@@ -850,13 +878,7 @@ fn metadata_index_from_file_path(
             ));
         };
 
-        let Ok(index) = index_str.parse::<IndexId>() else {
-            return Err(zip::result::ZipError::InvalidArchive(
-                std::borrow::Cow::Borrowed("invalid file path"),
-            ));
-        };
-
-        let Some(pixel) = position_pattern.index_to_pixel(index) else {
+        let Ok(index) = index_str.parse::<IndexType>() else {
             return Err(zip::result::ZipError::InvalidArchive(
                 std::borrow::Cow::Borrowed("invalid file path"),
             ));
@@ -871,13 +893,13 @@ fn metadata_index_from_file_path(
             ));
         };
 
-        let Ok(segment) = segment_str.parse::<SegmentId>() else {
+        let Ok(segment) = segment_str.parse::<SegmentType>() else {
             return Err(zip::result::ZipError::InvalidArchive(
                 std::borrow::Cow::Borrowed("invalid file path"),
             ));
         };
 
-        return Ok(Some(super::MetadataIndex::Segment { pixel, segment }));
+        return Ok(Some(super::MetadataIndex::Segment { index, segment }));
     } else if filename.starts_with(INDEX_PREFIX)
         && filename.ends_with(&format!("/{}", super::PROPERTIES_FILE_PATH))
     {
@@ -887,19 +909,13 @@ fn metadata_index_from_file_path(
             ));
         };
 
-        let Ok(index) = index_str.parse::<IndexId>() else {
+        let Ok(index) = index_str.parse::<IndexType>() else {
             return Err(zip::result::ZipError::InvalidArchive(
                 std::borrow::Cow::Borrowed("invalid file path"),
             ));
         };
 
-        let Some(pixel) = position_pattern.index_to_pixel(index) else {
-            return Err(zip::result::ZipError::InvalidArchive(
-                std::borrow::Cow::Borrowed("invalid file path"),
-            ));
-        };
-
-        return Ok(Some(super::MetadataIndex::Pixel(pixel)));
+        return Ok(Some(super::MetadataIndex::Index(index)));
     } else {
         return Ok(None);
     }
@@ -918,7 +934,7 @@ pub struct DatasetInfo {
 }
 
 enum Index {
-    Range { min: IndexId, max: IndexId },
+    Range { min: IndexType, max: IndexType },
 }
 
 struct PositionPattern {
@@ -945,28 +961,28 @@ impl PositionPattern {
 impl PositionPattern {
     /// # Returns
     /// `None` if pixel coordinate is invalid.
-    pub fn pixel_to_index(&self, pixel: &super::Pixel) -> Option<IndexId> {
+    pub fn pixel_to_index(&self, pixel: &super::Pixel) -> Option<IndexType> {
         match &self.kind {
             PositionPatternType::Grid(grid) => {
-                if pixel.i >= grid.i_length as IndexId || pixel.j >= grid.j_length as IndexId {
+                if pixel.i >= grid.i_length as IndexType || pixel.j >= grid.j_length as IndexType {
                     return None;
                 }
 
-                Some(pixel.j * grid.i_length as IndexId + pixel.i)
+                Some(pixel.j * grid.i_length as IndexType + pixel.i)
             }
         }
     }
 
     /// # Returns
     /// `None` if index is invalid.
-    pub fn index_to_pixel(&self, index: IndexId) -> Option<super::Pixel> {
+    pub fn index_to_pixel(&self, index: IndexType) -> Option<super::Pixel> {
         match &self.kind {
             PositionPatternType::Grid(grid) => {
-                let y = index / grid.i_length as IndexId;
-                if y >= grid.j_length as IndexId {
+                let y = index / grid.i_length as IndexType;
+                if y >= grid.j_length as IndexType {
                     return None;
                 }
-                let x = index % grid.i_length as IndexId;
+                let x = index % grid.i_length as IndexType;
                 return Some(super::Pixel { i: x, j: y });
             }
         }
@@ -1090,7 +1106,7 @@ pub enum DataError {
 }
 
 mod utils {
-    use super::{super::PROPERTIES_FILE_PATH, IndexId, SegmentId};
+    use super::{super::PROPERTIES_FILE_PATH, IndexType, SegmentType};
     use std::{fmt, io, path::PathBuf};
     use zip::ZipArchive;
 
@@ -1107,17 +1123,17 @@ mod utils {
         PathBuf::from(PROPERTIES_FILE_PATH)
     }
 
-    pub fn index_properties_path(index: IndexId) -> PathBuf {
+    pub fn index_properties_path(index: IndexType) -> PathBuf {
         let path = format!("{INDEX_DIR}/{index}/{INDEX_PROPERTIES_FILE}");
         PathBuf::from(path)
     }
 
-    pub fn index_segment_path(index: IndexId, segment: SegmentId) -> PathBuf {
+    pub fn index_segment_path(index: IndexType, segment: SegmentType) -> PathBuf {
         let path = format!("{INDEX_DIR}/{index}/{SEGMENT_DIR}/{segment}");
         PathBuf::from(path)
     }
 
-    pub fn index_segment_properties_path(index: IndexId, segment: SegmentId) -> PathBuf {
+    pub fn index_segment_properties_path(index: IndexType, segment: SegmentType) -> PathBuf {
         let path = format!("{INDEX_DIR}/{index}/{SEGMENT_DIR}/{segment}/{SEGMENT_PROPERTIES_FILE}");
         PathBuf::from(path)
     }
@@ -1129,7 +1145,7 @@ mod utils {
 
     pub fn index_data<R>(
         archive: &mut ZipArchive<R>,
-        index: IndexId,
+        index: IndexType,
     ) -> Result<super::index_data::IndexData, super::super::QueryError>
     where
         R: io::Read + io::Seek,
@@ -1164,8 +1180,8 @@ mod utils {
 
     pub fn segment_properties<R>(
         archive: &mut zip::ZipArchive<R>,
-        index: IndexId,
-        segment: SegmentId,
+        index: IndexType,
+        segment: SegmentType,
     ) -> Result<super::SegmentProperties, super::super::QueryError>
     where
         R: io::Read + io::Seek,
@@ -1194,7 +1210,7 @@ mod utils {
     /// + `index` only used for error reporting.
     pub fn segment_data(
         properties: &super::SegmentProperties,
-        index: IndexId,
+        index: IndexType,
     ) -> Result<super::segment_data::SegmentData, super::super::QueryError> {
         use super::{super::QueryError, PropertyError, segment_data};
 
@@ -1215,8 +1231,8 @@ mod utils {
     pub fn channel_data(
         segment_properties: &super::SegmentProperties,
         channel: impl fmt::Display,
-        index: IndexId,
-        segment: SegmentId,
+        index: IndexType,
+        segment: SegmentType,
     ) -> Result<super::channel_data::ChannelData, super::super::QueryError> {
         use super::{super::QueryError, PropertyError, channel_data};
 
@@ -1234,11 +1250,11 @@ mod utils {
 }
 
 mod index_data {
-    use super::SegmentId;
+    use super::SegmentType;
     use crate::properties::{self, Properties, PropertyError};
 
     pub struct IndexData {
-        segment_count: SegmentId,
+        segment_count: SegmentType,
     }
 
     impl IndexData {
@@ -1248,14 +1264,14 @@ mod index_data {
     impl IndexData {
         pub fn from_properties(properties: &Properties) -> Result<Self, PropertyError> {
             let segment_count =
-                properties::extract_value!(properties, Self::SEGMENT_COUNT_KEY, parse SegmentId)?;
+                properties::extract_value!(properties, Self::SEGMENT_COUNT_KEY, parse SegmentType)?;
 
             Ok(Self { segment_count })
         }
     }
 
     impl IndexData {
-        pub fn segment_count(&self) -> SegmentId {
+        pub fn segment_count(&self) -> SegmentType {
             self.segment_count
         }
     }

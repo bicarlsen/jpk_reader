@@ -34,6 +34,7 @@ impl LcdInfo {
         let decoder = match data_type {
             DataType::Integer => decoder::int_from_properties(&properties, index)?,
             DataType::Float => Arc::new(decoder::RawFloatDecoder),
+            DataType::Raster => Arc::new(decoder::RasterDecoder),
         };
 
         let channel_info = ChannelInfo::from_properties(properties, index)?;
@@ -53,7 +54,7 @@ impl LcdInfo {
     /// # Returns
     /// List of available unit conversions.
     pub fn available_units(&self) -> Vec<String> {
-        todo!()
+        todo!("LcdInfo::available_units")
     }
 
     /// Convrt raw data to default units.
@@ -68,7 +69,7 @@ impl LcdInfo {
 
     /// Get data in given units.
     pub fn convert_data_to(&self, unit: String) -> Result<Vec<Value>, PropertyError> {
-        todo!()
+        todo!("LcdInfo::convert_data_to")
     }
 }
 
@@ -78,6 +79,7 @@ pub enum DataType {
     Integer,
     /// `f32`.
     Float,
+    Raster,
 }
 
 impl DataType {
@@ -85,6 +87,7 @@ impl DataType {
         match input.as_ref() {
             "integer-data" => Some(Self::Integer),
             "float-data" => Some(Self::Float),
+            "raster-data" => Some(Self::Raster),
             _ => None,
         }
     }
@@ -92,7 +95,7 @@ impl DataType {
 
 #[derive(Clone)]
 pub struct ChannelInfo {
-    pub kind: ChannelType,
+    pub kind: ChannelKind,
     pub name: String,
     pub fancy_name: String,
 }
@@ -120,7 +123,7 @@ impl ChannelInfo {
         index: usize,
     ) -> Result<Self, PropertyError> {
         let kind =
-            properties::extract_value!(properties, Self::type_key(index), from_str ChannelType)?;
+            properties::extract_value!(properties, Self::type_key(index), from_str ChannelKind)?;
         let name = properties::extract_value!(properties, Self::name_key(index))?;
         let fancy_name = properties::extract_value!(properties, Self::fancy_name_key(index))?;
 
@@ -133,11 +136,11 @@ impl ChannelInfo {
 }
 
 #[derive(Clone, Copy)]
-pub enum ChannelType {
+pub enum ChannelKind {
     Channel,
 }
 
-impl ChannelType {
+impl ChannelKind {
     pub fn from_str(input: impl AsRef<str>) -> Option<Self> {
         match input.as_ref() {
             "channel" => Some(Self::Channel),
@@ -180,6 +183,30 @@ pub mod scale {
         }
     }
 
+    pub struct Identity;
+    macro_rules! impl_scale_identity {
+      ($($ty:ty),+) => {
+                    $(impl Scale<$ty> for Identity {
+                        fn scale(&self, value: $ty) -> Value {
+                            Into::<Value>::into(value)
+                        }
+                    })+
+                };
+    }
+    impl_scale_identity!(i16, u16, i32, u32);
+
+    impl Scale<i64> for Identity {
+        fn scale(&self, value: i64) -> Value {
+            value as Value
+        }
+    }
+
+    impl Scale<Value> for Identity {
+        fn scale(&self, value: Value) -> Value {
+            value
+        }
+    }
+
     pub struct LinearOffsetMultiplier {
         a0: Value,
         a1: Value,
@@ -192,14 +219,14 @@ pub mod scale {
     }
 
     macro_rules! impl_scale_linear_offset_multiplier {
-                ($($ty:ty),+) => {
-                    $(impl Scale<$ty> for LinearOffsetMultiplier {
-                        fn scale(&self, value: $ty) -> Value {
-                            self.a0 + self.a1 * Into::<Value>::into(value)
-                        }
-                    })+
-                };
-            }
+        ($($ty:ty),+) => {
+            $(impl Scale<$ty> for LinearOffsetMultiplier {
+                fn scale(&self, value: $ty) -> Value {
+                    self.a0 + self.a1 * Into::<Value>::into(value)
+                }
+            })+
+        };
+    }
     impl_scale_linear_offset_multiplier!(i16, u16, i32, u32);
 
     impl Scale<i64> for LinearOffsetMultiplier {
@@ -402,6 +429,21 @@ pub mod decoder {
         }
     }
 
+    pub struct RasterDecoder;
+    impl DecodeRaw for RasterDecoder {
+        type Data = usize;
+
+        fn decode_raw(&self, data: &RawData) -> Result<Vec<Self::Data>, InvalidDataLength> {
+            todo!("RasterDecoder::decode_raw")
+        }
+    }
+
+    impl Scale<usize> for RasterDecoder {
+        fn scale(&self, value: usize) -> Value {
+            todo!("RasterDecoder::scale")
+        }
+    }
+
     /// Data has an invalid number of bytes for the given type.
     pub struct InvalidDataLength;
 }
@@ -490,8 +532,8 @@ mod conversion {
     #[derive(Clone)]
     pub struct Conversion {
         name: String,
-        base_slot: String,
-        calibration_slot: String,
+        base_slot: Option<String>,
+        calibration_slot: Option<String>,
         scale: Arc<dyn scale::Scale<Value> + Sync + Send>,
     }
 
@@ -549,9 +591,16 @@ mod conversion {
             conversion: impl fmt::Display,
         ) -> Result<Self, super::PropertyError> {
             let defined = properties::extract_value!(properties, Self::defined_key(index, &conversion), parse bool)?;
-            assert!(defined, "todo");
-
             let name = properties::extract_value!(properties, Self::name_key(index, &conversion))?;
+            if !defined {
+                return Ok(Self {
+                    name: name.clone(),
+                    base_slot: None,
+                    calibration_slot: None,
+                    scale: Arc::new(scale::Identity),
+                });
+            }
+
             let base_slot =
                 properties::extract_value!(properties, Self::base_slot_key(index, &conversion))?;
             let calibration_slot =
@@ -568,8 +617,8 @@ mod conversion {
 
             Ok(Self {
                 name: name.clone(),
-                base_slot: base_slot.clone(),
-                calibration_slot: calibration_slot.clone(),
+                base_slot: Some(base_slot.clone()),
+                calibration_slot: Some(calibration_slot.clone()),
                 scale,
             })
         }

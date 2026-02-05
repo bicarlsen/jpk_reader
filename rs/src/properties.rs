@@ -62,7 +62,17 @@ impl Properties {
     }
 }
 
+impl IntoIterator for Properties {
+    type Item = (String, String);
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.properties.into_iter()
+    }
+}
+
 /// The format of the file was invalid.
+#[derive(Debug)]
 pub struct InvalidFormat;
 
 pub enum PropertyError {

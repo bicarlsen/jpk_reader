@@ -1,15 +1,17 @@
 use crate::properties::Properties;
 use std::{
-    cmp, fmt, fs, io,
+    cmp,
+    collections::HashMap,
+    fmt, fs, io,
     path::{Path, PathBuf},
 };
 
 mod v2_0;
 
 type Value = f64;
-type IndexId = u32;
-type SegmentId = u8;
-type ChannelId = String;
+type IndexType = u32;
+type SegmentType = u8;
+type ChannelType = String;
 
 const PROPERTIES_FILE_PATH: &str = "header.properties";
 const SEGMENT_PROPERTIES_FILE_PATH: &str = "segment-header.properties";
@@ -61,69 +63,43 @@ impl Data {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Deref, derive_more::DerefMut)]
 pub struct Metadata {
-    indices: Vec<MetadataIndex>,
-    data: Vec<Properties>,
+    inner: HashMap<MetadataIndex, Properties>,
 }
 
 impl Metadata {
-    pub fn new() -> Self {
-        Self {
-            indices: Vec::new(),
-            data: Vec::new(),
-        }
-    }
-
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            indices: Vec::with_capacity(capacity),
-            data: Vec::with_capacity(capacity),
+            inner: HashMap::with_capacity(capacity),
         }
     }
 
-    pub fn from(
+    /// Creates `Metadata` from separate indices and properties `Vec`s.
+    /// If an index is repeated, the last associated properties is retained.
+    pub fn from_parts(
         indices: Vec<MetadataIndex>,
         data: Vec<Properties>,
     ) -> Result<Self, InvalidDataIndices> {
         if data.len() != indices.len() {
             return Err(InvalidDataIndices);
         }
-        let mut idx_map = (0..indices.len()).collect::<Vec<_>>();
-        idx_map.sort_unstable_by_key(|&idx| &indices[idx]);
 
-        let mut data = data.into_iter().enumerate().collect::<Vec<_>>();
-        let mut indices = indices.into_iter().enumerate().collect::<Vec<_>>();
-        data.sort_unstable_by_key(|(idx, _)| idx_map[*idx]);
-        indices.sort_unstable_by_key(|(idx, _)| idx_map[*idx]);
-        let data = data.into_iter().map(|(_, value)| value).collect::<Vec<_>>();
-        let indices = indices
-            .into_iter()
-            .map(|(_, value)| value)
-            .collect::<Vec<_>>();
+        let mut inner = HashMap::with_capacity(indices.len());
+        for (index, properties) in std::iter::zip(indices, data) {
+            inner.insert(index, properties);
+        }
 
-        Ok(Self { indices, data })
-    }
-
-    pub fn len(&self) -> usize {
-        self.indices.len()
-    }
-
-    pub fn get(&self, index: &MetadataIndex) -> Option<&Properties> {
-        let idx = self.indices.binary_search(index).ok()?;
-        Some(&self.data[idx])
-    }
-
-    pub fn push(&mut self, index: MetadataIndex, data: Properties) {
-        self.indices.push(index);
-        self.data.push(data)
+        Ok(Self { inner })
     }
 }
 
-impl From<Vec<(MetadataIndex, Properties)>> for Metadata {
-    fn from(value: Vec<(MetadataIndex, Properties)>) -> Self {
-        let (indices, data) = value.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-        Self { indices, data }
+impl IntoIterator for Metadata {
+    type Item = (MetadataIndex, Properties);
+    type IntoIter = std::collections::hash_map::IntoIter<MetadataIndex, Properties>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
     }
 }
 
@@ -133,15 +109,15 @@ pub struct InvalidDataIndices;
 
 #[derive(Debug, PartialEq, Ord, Eq)]
 pub struct DataIndex {
-    pub pixel: Pixel,
-    pub segment: SegmentId,
-    pub channel: ChannelId,
+    pub index: IndexType,
+    pub segment: SegmentType,
+    pub channel: ChannelType,
 }
 
 impl DataIndex {
-    pub fn new(pixel: Pixel, segment: SegmentId, channel: impl Into<ChannelId>) -> Self {
+    pub fn new(index: IndexType, segment: SegmentType, channel: impl Into<ChannelType>) -> Self {
         Self {
-            pixel,
+            index,
             segment,
             channel: channel.into(),
         }
@@ -151,7 +127,7 @@ impl DataIndex {
 impl PartialOrd for DataIndex {
     /// Order by `(index, segment, channel)`.
     fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
-        if let Some(order) = self.pixel.partial_cmp(&other.pixel) {
+        if let Some(order) = self.index.partial_cmp(&other.index) {
             if matches!(order, cmp::Ordering::Greater | cmp::Ordering::Less) {
                 return Some(order);
             }
@@ -167,23 +143,26 @@ impl PartialOrd for DataIndex {
     }
 }
 
-impl From<(Pixel, SegmentId, ChannelId)> for DataIndex {
-    fn from(value: (Pixel, SegmentId, ChannelId)) -> Self {
-        let (pixel, segment, channel) = value;
+impl From<(IndexType, SegmentType, ChannelType)> for DataIndex {
+    fn from(value: (IndexType, SegmentType, ChannelType)) -> Self {
+        let (index, segment, channel) = value;
         Self {
-            pixel,
+            index,
             segment,
             channel,
         }
     }
 }
 
-#[derive(Debug, PartialEq, Ord, Eq)]
+#[derive(Debug, PartialEq, Ord, Eq, Hash)]
 pub enum MetadataIndex {
     Dataset,
     SharedData,
-    Pixel(Pixel),
-    Segment { pixel: Pixel, segment: SegmentId },
+    Index(IndexType),
+    Segment {
+        index: IndexType,
+        segment: SegmentType,
+    },
 }
 
 impl PartialOrd for MetadataIndex {
@@ -194,36 +173,63 @@ impl PartialOrd for MetadataIndex {
             | (MetadataIndex::SharedData, MetadataIndex::SharedData) => Some(cmp::Ordering::Equal),
 
             (MetadataIndex::Dataset, MetadataIndex::SharedData)
-            | (MetadataIndex::Dataset, MetadataIndex::Pixel(_))
+            | (MetadataIndex::Dataset, MetadataIndex::Index(_))
             | (MetadataIndex::Dataset, MetadataIndex::Segment { .. })
-            | (MetadataIndex::SharedData, MetadataIndex::Pixel(_))
-            | (MetadataIndex::SharedData, MetadataIndex::Segment { .. })
-            | (MetadataIndex::Pixel(_), MetadataIndex::Segment { .. }) => {
-                Some(cmp::Ordering::Greater)
+            | (MetadataIndex::SharedData, MetadataIndex::Index(_))
+            | (MetadataIndex::SharedData, MetadataIndex::Segment { .. }) => {
+                Some(cmp::Ordering::Less)
             }
 
             (MetadataIndex::SharedData, MetadataIndex::Dataset)
-            | (MetadataIndex::Pixel(_), MetadataIndex::Dataset)
-            | (MetadataIndex::Pixel(_), MetadataIndex::SharedData)
+            | (MetadataIndex::Index(_), MetadataIndex::Dataset)
+            | (MetadataIndex::Index(_), MetadataIndex::SharedData)
             | (MetadataIndex::Segment { .. }, MetadataIndex::Dataset)
-            | (MetadataIndex::Segment { .. }, MetadataIndex::SharedData)
-            | (MetadataIndex::Segment { .. }, MetadataIndex::Pixel(_)) => Some(cmp::Ordering::Less),
+            | (MetadataIndex::Segment { .. }, MetadataIndex::SharedData) => {
+                Some(cmp::Ordering::Greater)
+            }
 
-            (MetadataIndex::Pixel(a), MetadataIndex::Pixel(b)) => a.partial_cmp(b),
+            (MetadataIndex::Index(a), MetadataIndex::Index(b)) => a.partial_cmp(b),
 
             (
                 MetadataIndex::Segment {
-                    pixel: idx_a,
+                    index: idx_a,
                     segment: segment_a,
                 },
                 MetadataIndex::Segment {
-                    pixel: idx_b,
+                    index: idx_b,
                     segment: segment_b,
                 },
             ) => {
                 let mut ord = idx_a.partial_cmp(idx_b).unwrap();
                 if matches!(ord, cmp::Ordering::Equal) {
                     ord = segment_a.partial_cmp(segment_b).unwrap();
+                }
+                Some(ord)
+            }
+
+            (
+                MetadataIndex::Index(pa),
+                MetadataIndex::Segment {
+                    index: pb,
+                    segment: sb,
+                },
+            ) => {
+                let mut ord = pa.partial_cmp(pb).unwrap();
+                if matches!(ord, cmp::Ordering::Equal) {
+                    ord = cmp::Ordering::Less
+                }
+                Some(ord)
+            }
+            (
+                MetadataIndex::Segment {
+                    index: pa,
+                    segment: sa,
+                },
+                MetadataIndex::Index(pb),
+            ) => {
+                let mut ord = pa.partial_cmp(pb).unwrap();
+                if matches!(ord, cmp::Ordering::Equal) {
+                    ord = cmp::Ordering::Greater
                 }
                 Some(ord)
             }
@@ -261,6 +267,7 @@ pub enum MetadataQuery {
 
 pub enum IndexQuery {
     All,
+    Index(IndexType),
     PixelRect(PixelRect),
     Pixel(Pixel),
 }
@@ -282,11 +289,11 @@ impl PixelRect {
         Self { start, end }
     }
 
-    pub fn rows(&self) -> IndexId {
+    pub fn rows(&self) -> IndexType {
         self.end.j - self.start.j + 1
     }
 
-    pub fn cols(&self) -> IndexId {
+    pub fn cols(&self) -> IndexType {
         self.end.i - self.start.j + 1
     }
 
@@ -297,8 +304,8 @@ impl PixelRect {
 
 pub struct PixelRectIter<'a> {
     inner: &'a PixelRect,
-    i: IndexId,
-    j: IndexId,
+    i: IndexType,
+    j: IndexType,
 }
 
 impl<'a> PixelRectIter<'a> {
@@ -332,41 +339,41 @@ impl<'a> std::iter::Iterator for PixelRectIter<'a> {
 
 pub enum SegmentQuery {
     All,
-    Indices(Vec<SegmentId>),
+    Indices(Vec<SegmentType>),
 }
 
 pub enum ChannelQuery {
     All,
-    Include(Vec<ChannelId>),
+    Include(Vec<ChannelType>),
 }
 
 impl ChannelQuery {
-    pub fn include(channels: impl IntoIterator<Item = impl Into<ChannelId>>) -> Self {
+    pub fn include(channels: impl IntoIterator<Item = impl Into<ChannelType>>) -> Self {
         let channels = channels.into_iter().map(|channel| channel.into()).collect();
         Self::Include(channels)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, Hash)]
 pub struct Pixel {
-    i: IndexId,
-    j: IndexId,
+    i: IndexType,
+    j: IndexType,
 }
 
 impl Pixel {
-    pub fn new(i: IndexId, j: IndexId) -> Self {
+    pub fn new(i: IndexType, j: IndexType) -> Self {
         Self { i, j }
     }
 
-    pub fn i(&self) -> IndexId {
+    pub fn i(&self) -> IndexType {
         self.i
     }
 
-    pub fn j(&self) -> IndexId {
+    pub fn j(&self) -> IndexType {
         self.j
     }
 
-    pub fn to_index(&self, cols: IndexId) -> IndexId {
+    pub fn to_index(&self, cols: IndexType) -> IndexType {
         self.j * cols + self.i
     }
 }
@@ -444,6 +451,20 @@ impl QIMapReader for VersionedFileReader {
     }
 }
 
+impl crate::ArchiveReader for VersionedFileReader {
+    fn files(&self) -> Vec<&str> {
+        match self {
+            VersionedFileReader::V2_0(reader) => reader.files(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            VersionedFileReader::V2_0(reader) => reader.len(),
+        }
+    }
+}
+
 #[derive(derive_more::From)]
 pub enum VersionedReader<R> {
     V2_0(v2_0::Reader<R>),
@@ -462,6 +483,23 @@ where
     fn query_metadata(&mut self, query: &MetadataQuery) -> Result<Metadata, QueryError> {
         match self {
             VersionedReader::V2_0(reader) => reader.query_metadata(query),
+        }
+    }
+}
+
+impl<R> crate::ArchiveReader for VersionedReader<R>
+where
+    R: io::Read + io::Seek,
+{
+    fn files(&self) -> Vec<&str> {
+        match self {
+            VersionedReader::V2_0(reader) => reader.files(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            VersionedReader::V2_0(reader) => reader.len(),
         }
     }
 }

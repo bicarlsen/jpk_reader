@@ -9,9 +9,10 @@ classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "Intended Audience :: Science/Research",
 ]
 dynamic = ["version"]
-
+description = "Read JPK AFM data files."
 dependencies = ["pyarrow"]
 
 [project.urls]

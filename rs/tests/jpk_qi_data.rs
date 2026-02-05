@@ -1,9 +1,14 @@
 use jpk_reader::qi_map::{self, QIMapReader};
 use std::{fs, path::PathBuf};
 
-const DATA_DIR: &str = "../data/qi_data";
-const DATA_FILE_LG: &str = "qi_data-2_0-lg.jpk-qi-data";
-const DATA_FILE_SM: &str = "qi_data-sm.jpk-qi-data";
+// const DATA_DIR: &str = "../data/qi_data";
+// const DATA_FILE_LG: &str = "qi_data-2_0-lg.jpk-qi-data";
+// const DATA_FILE_SM: &str = "qi_data-sm.jpk-qi-data";
+
+const DATA_DIR: &str =
+    "S:\\_öffentlich_TAUSCHordner\\Mitarbeitende\\carlsen_brian\\degradation\\00-preliminary\\01";
+const DATA_FILE_LG: &str = "carlsen-asfaw-postdegradation-data-2026.01.08-16.35.28.552.jpk-qi-data";
+
 #[test]
 fn qi_map_file_reader_format_version() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -31,9 +36,9 @@ fn qi_map_reader_query_data() {
     };
     let result = data.query_data(&query).unwrap();
     assert_eq!(result.len(), 2);
-    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "measuredHeight");
+    let idx = qi_map::DataIndex::new(0, 0, "measuredHeight");
     let values = result.get(&idx).unwrap();
-    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "smoothedMeasuredHeight");
+    let idx = qi_map::DataIndex::new(0, 0, "smoothedMeasuredHeight");
     let values = result.get(&idx).unwrap();
 
     // long running test
@@ -81,9 +86,9 @@ fn qi_map_file_reader_query_data() {
     };
     let result = data.query_data(&query).unwrap();
     assert_eq!(result.len(), 2);
-    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "measuredHeight");
+    let idx = qi_map::DataIndex::new(0, 0, "measuredHeight");
     let values = result.get(&idx).unwrap();
-    let idx = qi_map::DataIndex::new(pixel.clone(), 0, "smoothedMeasuredHeight");
+    let idx = qi_map::DataIndex::new(0, 0, "smoothedMeasuredHeight");
     let values = result.get(&idx).unwrap();
 
     let query = qi_map::DataQuery::select_all();
@@ -95,6 +100,7 @@ fn qi_map_file_reader_query_metadata() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
+    let data_path = PathBuf::from(DATA_DIR).join(DATA_FILE_LG);
     let mut data = qi_map::FileReader::new(data_path).unwrap();
 
     let query = qi_map::MetadataQuery::All;
