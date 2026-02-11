@@ -1,4 +1,6 @@
-use crate::properties::Properties;
+//! QI map data reader.
+//! (`.jpk-qi-data`)
+use properties::Properties;
 use std::{
     cmp,
     collections::HashMap,
@@ -13,8 +15,7 @@ type IndexType = u32;
 type SegmentType = u8;
 type ChannelType = String;
 
-const PROPERTIES_FILE_PATH: &str = "header.properties";
-const SEGMENT_PROPERTIES_FILE_PATH: &str = "segment-header.properties";
+const DATASET_PROPERTIES_FILE_PATH: &str = "header.properties";
 const PROPERTIES_FILE_FORMAT_VERSION_KEY: &str = "file-format-version";
 
 pub trait QIMapReader {
@@ -560,21 +561,21 @@ impl FileReader {
         let properties = {
             let mut properties =
                 archive
-                    .by_path(PROPERTIES_FILE_PATH)
+                    .by_path(DATASET_PROPERTIES_FILE_PATH)
                     .map_err(|error| Error::Zip {
-                        path: PathBuf::from(PROPERTIES_FILE_PATH),
+                        path: PathBuf::from(DATASET_PROPERTIES_FILE_PATH),
                         error,
                     })?;
 
             Properties::new(&mut properties).map_err(|_err| Error::InvalidFormat {
-                path: PathBuf::from(PROPERTIES_FILE_PATH),
+                path: PathBuf::from(DATASET_PROPERTIES_FILE_PATH),
                 cause: "invalid format".to_string(),
             })?
         };
 
         let Some(format_version) = properties.get(PROPERTIES_FILE_FORMAT_VERSION_KEY) else {
             return Err(Error::InvalidFormat {
-                path: PathBuf::from(PROPERTIES_FILE_PATH),
+                path: PathBuf::from(DATASET_PROPERTIES_FILE_PATH),
                 cause: format!("property `{PROPERTIES_FILE_FORMAT_VERSION_KEY}` not found"),
             });
         };
@@ -630,21 +631,21 @@ impl Reader {
         let properties = {
             let mut properties =
                 archive
-                    .by_path(PROPERTIES_FILE_PATH)
+                    .by_path(DATASET_PROPERTIES_FILE_PATH)
                     .map_err(|error| Error::Zip {
-                        path: PathBuf::from(PROPERTIES_FILE_PATH),
+                        path: PathBuf::from(DATASET_PROPERTIES_FILE_PATH),
                         error,
                     })?;
 
             Properties::new(&mut properties).map_err(|_err| Error::InvalidFormat {
-                path: PathBuf::from(PROPERTIES_FILE_PATH),
+                path: PathBuf::from(DATASET_PROPERTIES_FILE_PATH),
                 cause: "invalid format".to_string(),
             })?
         };
 
         let Some(format_version) = properties.get(PROPERTIES_FILE_FORMAT_VERSION_KEY) else {
             return Err(Error::InvalidFormat {
-                path: PathBuf::from(PROPERTIES_FILE_PATH),
+                path: PathBuf::from(DATASET_PROPERTIES_FILE_PATH),
                 cause: format!("property `{PROPERTIES_FILE_FORMAT_VERSION_KEY}` not found"),
             });
         };

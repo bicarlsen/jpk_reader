@@ -1,8 +1,13 @@
-use std::path::Path;
-use zip;
+//! Read various data produced by JPK AFM.
 
-pub mod properties;
-pub mod qi_map;
+pub mod dataset;
+
+// #[cfg(feature = "qi_map")]
+// pub mod qi_map;
+#[cfg(feature = "scope")]
+pub mod scope;
+#[cfg(feature = "voltage_spectroscopy")]
+pub mod voltage_spectroscopy;
 
 pub trait ArchiveReader {
     /// List of files in the archive.

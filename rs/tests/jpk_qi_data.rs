@@ -1,13 +1,9 @@
 use jpk_reader::qi_map::{self, QIMapReader};
 use std::{fs, path::PathBuf};
 
-// const DATA_DIR: &str = "../data/qi_data";
-// const DATA_FILE_LG: &str = "qi_data-2_0-lg.jpk-qi-data";
-// const DATA_FILE_SM: &str = "qi_data-sm.jpk-qi-data";
-
-const DATA_DIR: &str =
-    "S:\\_öffentlich_TAUSCHordner\\Mitarbeitende\\carlsen_brian\\degradation\\00-preliminary\\01";
-const DATA_FILE_LG: &str = "carlsen-asfaw-postdegradation-data-2026.01.08-16.35.28.552.jpk-qi-data";
+const DATA_DIR: &str = "../data/qi_data";
+const DATA_FILE_LG: &str = "qi_data-2_0-lg.jpk-qi-data";
+const DATA_FILE_SM: &str = "qi_data-sm.jpk-qi-data";
 
 #[test]
 fn qi_map_file_reader_format_version() {

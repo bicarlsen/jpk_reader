@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.10,<2.0"]
+requires = ["maturin>=1.11,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -13,7 +13,7 @@ classifiers = [
 ]
 dynamic = ["version"]
 description = "Read JPK AFM data files."
-dependencies = ["pyarrow"]
+dependencies = ["pyarrow", "polars"]
 
 [project.urls]
 Issues = "https://github.com/bicarlsen/jpk_reader/issues"
