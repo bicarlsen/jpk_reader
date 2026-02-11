@@ -1,0 +1,8 @@
+module = "icon"
+
+[glyphs]
+edit = "fontawesome-pencil"
+opendir = "fontawesome-folder-open-empty"
+file = "fontawesome-doc"
+save = "entypo-floppy"
+trash = "typicons-trash"

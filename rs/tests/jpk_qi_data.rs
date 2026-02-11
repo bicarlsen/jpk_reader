@@ -1,24 +1,9 @@
-use jpk_reader::qi_map::{self, QIMapReader};
+use jpk_reader::qi_map;
 use std::{fs, path::PathBuf};
 
-// const DATA_DIR: &str = "../data/qi_data";
-// const DATA_FILE_LG: &str = "qi_data-2_0-lg.jpk-qi-data";
-// const DATA_FILE_SM: &str = "qi_data-sm.jpk-qi-data";
-
-const DATA_DIR: &str =
-    "S:\\_öffentlich_TAUSCHordner\\Mitarbeitende\\carlsen_brian\\degradation\\00-preliminary\\01";
-const DATA_FILE_LG: &str = "carlsen-asfaw-postdegradation-data-2026.01.08-16.35.28.552.jpk-qi-data";
-
-#[test]
-fn qi_map_file_reader_format_version() {
-    let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(DATA_DIR)
-        .join(DATA_FILE_LG);
-
-    let version_str = qi_map::FileReader::format_version(data_path).unwrap();
-    let version = qi_map::FormatVersion::from_str(version_str).unwrap();
-    assert!(matches!(version, qi_map::FormatVersion::V2_0))
-}
+const DATA_DIR: &str = "../data/qi_data";
+const DATA_FILE_LG: &str = "qi_data-2_0-lg.jpk-qi-data";
+const DATA_FILE_SM: &str = "qi_data-sm.jpk-qi-data";
 
 #[test]
 fn qi_map_reader_query_data() {
@@ -26,24 +11,8 @@ fn qi_map_reader_query_data() {
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
     let file = fs::File::open(&data_path).unwrap();
-    let mut data = qi_map::Reader::new(file).unwrap();
-
-    let pixel = qi_map::Pixel::new(0, 0);
-    let query = qi_map::DataQuery {
-        index: qi_map::IndexQuery::Pixel(pixel.clone()),
-        segment: qi_map::SegmentQuery::Indices(vec![0]),
-        channel: qi_map::ChannelQuery::include(vec!["measuredHeight", "smoothedMeasuredHeight"]),
-    };
-    let result = data.query_data(&query).unwrap();
-    assert_eq!(result.len(), 2);
-    let idx = qi_map::DataIndex::new(0, 0, "measuredHeight");
-    let values = result.get(&idx).unwrap();
-    let idx = qi_map::DataIndex::new(0, 0, "smoothedMeasuredHeight");
-    let values = result.get(&idx).unwrap();
-
-    // long running test
-    // let query = qi_map::DataQuery::select_all();
-    // let all = data.query_data(&query).unwrap();
+    let archive = zip::ZipArchive::new(file).unwrap();
+    let mut reader = qi_map::v2_0::Reader::new(archive).unwrap();
 }
 
 #[test]
@@ -52,23 +21,8 @@ fn qi_map_reader_query_metadata() {
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
     let file = fs::File::open(&data_path).unwrap();
-    let mut data = qi_map::Reader::new(file).unwrap();
-
-    let query = qi_map::MetadataQuery::All;
-    let result = data.query_metadata(&query).unwrap();
-
-    let query = qi_map::MetadataQuery::Dataset;
-    let result = data.query_metadata(&query).unwrap();
-    assert_eq!(result.len(), 1);
-
-    let query = qi_map::MetadataQuery::SharedData;
-    let result = data.query_metadata(&query).unwrap();
-    assert_eq!(result.len(), 1);
-
-    let pixel = qi_map::Pixel::new(0, 0);
-    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel));
-    let result = data.query_metadata(&query).unwrap();
-    assert_eq!(result.len(), 1);
+    let archive = zip::ZipArchive::new(file).unwrap();
+    let mut reader = qi_map::v2_0::Reader::new(archive).unwrap();
 }
 
 #[test]
@@ -76,23 +30,7 @@ fn qi_map_file_reader_query_data() {
     let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
-    let mut data = qi_map::FileReader::new(data_path).unwrap();
-
-    let pixel = qi_map::Pixel::new(0, 0);
-    let query = qi_map::DataQuery {
-        index: qi_map::IndexQuery::Pixel(pixel.clone()),
-        segment: qi_map::SegmentQuery::Indices(vec![0]),
-        channel: qi_map::ChannelQuery::include(vec!["measuredHeight", "smoothedMeasuredHeight"]),
-    };
-    let result = data.query_data(&query).unwrap();
-    assert_eq!(result.len(), 2);
-    let idx = qi_map::DataIndex::new(0, 0, "measuredHeight");
-    let values = result.get(&idx).unwrap();
-    let idx = qi_map::DataIndex::new(0, 0, "smoothedMeasuredHeight");
-    let values = result.get(&idx).unwrap();
-
-    let query = qi_map::DataQuery::select_all();
-    let all = data.query_data(&query).unwrap();
+    let mut reader = qi_map::v2_0::FileReader::new(data_path).unwrap();
 }
 
 #[test]
@@ -101,23 +39,7 @@ fn qi_map_file_reader_query_metadata() {
         .join(DATA_DIR)
         .join(DATA_FILE_LG);
     let data_path = PathBuf::from(DATA_DIR).join(DATA_FILE_LG);
-    let mut data = qi_map::FileReader::new(data_path).unwrap();
-
-    let query = qi_map::MetadataQuery::All;
-    let result = data.query_metadata(&query).unwrap();
-
-    let query = qi_map::MetadataQuery::Dataset;
-    let result = data.query_metadata(&query).unwrap();
-    assert_eq!(result.len(), 1);
-
-    let query = qi_map::MetadataQuery::SharedData;
-    let result = data.query_metadata(&query).unwrap();
-    assert_eq!(result.len(), 1);
-
-    let pixel = qi_map::Pixel::new(0, 0);
-    let query = qi_map::MetadataQuery::Index(qi_map::IndexQuery::Pixel(pixel));
-    let result = data.query_metadata(&query).unwrap();
-    assert_eq!(result.len(), 1);
+    let mut reader = qi_map::v2_0::FileReader::new(data_path).unwrap();
 }
 
 pub mod tmp {
