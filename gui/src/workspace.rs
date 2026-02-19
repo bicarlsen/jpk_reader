@@ -49,6 +49,9 @@ pub enum Message {
         path: PathBuf,
         error: String,
     },
+    DatasetClosed {
+        path: PathBuf,
+    },
 }
 
 pub(crate) struct Workspace {
@@ -92,6 +95,7 @@ impl Workspace {
                 self.dataset_window_opened(path, window)
             }
             Message::DatasetError { path, error } => self.dataset_error(path, error),
+            Message::DatasetClosed { path } => self.dataset_closed(path),
         }
     }
 
@@ -191,5 +195,10 @@ impl Workspace {
 
     fn dataset_error(&mut self, path: PathBuf, error: String) -> iced::Task<Message> {
         todo!()
+    }
+
+    fn dataset_closed(&mut self, path: PathBuf) -> iced::Task<Message> {
+        self.datasets.retain(|dataset| dataset.path != path);
+        iced::Task::none()
     }
 }

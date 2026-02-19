@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
 
-members = ["rs", "py", "gui"]
+members = ["rs", "py", "gui", "analysis"]
 default-members = ["rs"]
 
 [workspace.dependencies]
 jpk_reader = { path = "rs" }
+analysis = { path = "analysis" }
 
+approx = "0.5.1"
 derive_more = "2.0"
 polars = "0.52.0"
 rayon = "1.10.0"

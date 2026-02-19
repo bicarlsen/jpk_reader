@@ -9,6 +9,7 @@
 
 default_job = "run"
 env.CARGO_TERM_COLOR = "always"
+watch = [ "gui", "rs" ]
 
 [jobs.check]
 command = ["cargo", "check"]

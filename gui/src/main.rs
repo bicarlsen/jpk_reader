@@ -5,7 +5,6 @@ use jpk_reader as jpk;
 use polars::prelude as pl;
 use std::{
     collections::HashMap,
-    io,
     path::{Path, PathBuf},
 };
 
@@ -113,11 +112,11 @@ impl App {
         ::tracing::trace!(message=?message);
 
         match message {
-            Message::AppClosed => self.close(),
+            Message::AppClosed => self.app_closed(),
             Message::Workspace(message) => self.update_workspace_message(message),
-            Message::Dataset { id, message } => todo!(),
+            Message::Dataset { id, message } => self.update_dataset_message(id, message),
             Message::WindowOpened { window, kind } => self.window_opened(window, kind),
-            Message::WindowClosed(id) => todo!(),
+            Message::WindowClosed(id) => self.window_closed(id),
             Message::OpenDatasetFilePath(path) => self.open_dataset_file_path(path),
             Message::OpenDatasetDirPath(path) => self.open_dataset_dir_path(path),
             Message::DatasetLoading { path } => self
@@ -149,25 +148,46 @@ impl App {
         }
     }
 
+    fn update_dataset_message(
+        &mut self,
+        id: PathBuf,
+        message: dataset::Message,
+    ) -> iced::Task<Message> {
+        self.datasets
+            .get_mut(&id)
+            .map(|dataset| match message {
+                dataset::Message::WindowOpened(window_id) => {
+                    let _ = self
+                        .windows
+                        .insert(window_id.clone(), WindowKind::Dataset(id.clone()));
+                    iced::Task::none()
+                }
+                _ => dataset
+                    .update(message)
+                    .map(move |message| Message::Dataset {
+                        id: id.clone(),
+                        message,
+                    }),
+            })
+            .expect("dataset should exist")
+    }
+
     pub fn view(&self, window: window::Id) -> iced::Element<'_, Message> {
         match self.windows.get(&window) {
             Some(WindowKind::Workspace) => self.workspace.view().map(Message::Workspace),
             Some(WindowKind::Dataset(path)) => {
-                if let Some(dataset) = self.datasets.get(path) {
-                    dataset.view().map(move |msg| Message::Dataset {
-                        id: path.clone(),
-                        message: msg,
-                    })
-                } else {
-                    todo!();
-                }
+                let dataset = self.datasets.get(path).expect("dataset should exist");
+                dataset.view(&window).map(move |msg| Message::Dataset {
+                    id: path.clone(),
+                    message: msg,
+                })
             }
             None => iced::widget::container(iced::widget::Space::new()).into(),
         }
     }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        iced::window::close_events().map(|_| Message::AppClosed)
+        iced::window::close_events().map(Message::WindowClosed)
     }
 }
 
@@ -192,8 +212,37 @@ impl App {
         task
     }
 
-    fn close(&mut self) -> iced::Task<Message> {
-        todo!();
+    fn window_closed(&mut self, id: iced::window::Id) -> iced::Task<Message> {
+        if self.windows.len() == 1 {
+            return iced::Task::done(Message::AppClosed);
+        }
+
+        let window = self.windows.remove(&id).expect("window should exist");
+        match window {
+            WindowKind::Workspace => {
+                iced::Task::done(workspace::Message::WorkspaceClosed(id).into())
+            }
+            WindowKind::Dataset(path) => {
+                // TODO: account for if a dataset child window was closed or the parent
+                let keep_dataset = self.windows.values().any(|window| {
+                    if let WindowKind::Dataset(dataset_path) = window {
+                        *dataset_path == path
+                    } else {
+                        false
+                    }
+                });
+                if keep_dataset {
+                    iced::Task::none()
+                } else {
+                    let _ = self.datasets.remove(&path);
+                    iced::Task::done(workspace::Message::DatasetClosed { path }.into())
+                }
+            }
+        }
+    }
+
+    fn app_closed(&mut self) -> iced::Task<Message> {
+        iced::exit()
     }
 
     fn open_dataset_file_path(&mut self, path: impl AsRef<Path>) -> iced::Task<Message> {
@@ -287,6 +336,7 @@ impl App {
         dataframe: pl::DataFrame,
     ) -> iced::Task<Message> {
         let path = path.into();
+
         let (dataset, open) = dataset::Dataset::new(path.clone(), reader, dataframe);
         let loaded = Task::done(
             workspace::Message::DatasetLoaded {
