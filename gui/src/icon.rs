@@ -1,6 +1,6 @@
 // Generated automatically by iced_fontello at build time.
 // Do not edit manually. Source: ../fonts/icons.toml
-// d51850166bc0500c42750f37268f96f94e9d42e87ac2e18a533696d52b55a8de
+// 9c864d13279985db8adb885aeeb385f802e5a3fc47845c9707ad1b70857d0727
 use iced::Font;
 use iced::widget::{Text, text};
 
@@ -14,8 +14,16 @@ pub fn file<'a>() -> Text<'a> {
     icon("\u{1F4C4}")
 }
 
+pub fn minus<'a>() -> Text<'a> {
+    icon("\u{2D}")
+}
+
 pub fn opendir<'a>() -> Text<'a> {
     icon("\u{F115}")
+}
+
+pub fn plus<'a>() -> Text<'a> {
+    icon("\u{2B}")
 }
 
 pub fn save<'a>() -> Text<'a> {

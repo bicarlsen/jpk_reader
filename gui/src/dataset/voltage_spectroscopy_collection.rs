@@ -1,6 +1,5 @@
 //! Element for a voltage spectroscopy dataset collection (multiple `.jpk-voltage-ramp`).
 
-use iced_aksel as aksel;
 use polars::prelude::{self as pl, *};
 
 const DEFAULT_X_COL: &str = "x";
@@ -47,11 +46,12 @@ impl super::IsFileCollection for State {
     }
 }
 
-impl super::DefaultAxes for State {
-    fn default_axes(&self) -> super::plot::Axes {
-        super::plot::Axes::new(DEFAULT_Y_COL)
-            .x(DEFAULT_X_COL)
-            .color(DEFAULT_COLOR_COL)
+impl super::PlotOptions for State {
+    fn plot_options(&self) -> super::plot::Options {
+        let mut options = super::plot::Options::new();
+        options.x_axis(DEFAULT_X_COL);
+        options.add_trace(0, DEFAULT_Y_COL);
+        options
     }
 }
 

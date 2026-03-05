@@ -1,5 +1,4 @@
 use iced::{Task, widget::container};
-use iced_aksel as aksel;
 use jpk_reader as jpk;
 use polars::prelude as pl;
 use std::path::PathBuf;
@@ -12,8 +11,8 @@ trait IsFileCollection {
     fn is_file_collection(&self) -> bool;
 }
 
-trait DefaultAxes {
-    fn default_axes(&self) -> plot::Axes;
+trait PlotOptions {
+    fn plot_options(&self) -> plot::Options;
 }
 
 #[derive(Debug, Clone, derive_more::From)]
@@ -52,11 +51,11 @@ impl IsFileCollection for DatasetState {
     }
 }
 
-impl DefaultAxes for DatasetState {
-    fn default_axes(&self) -> plot::Axes {
+impl PlotOptions for DatasetState {
+    fn plot_options(&self) -> plot::Options {
         match self {
-            DatasetState::VoltageSpectroscopy(state) => state.default_axes(),
-            DatasetState::VoltageSpectroscopyCollection(state) => state.default_axes(),
+            DatasetState::VoltageSpectroscopy(state) => state.plot_options(),
+            DatasetState::VoltageSpectroscopyCollection(state) => state.plot_options(),
         }
     }
 }
@@ -133,10 +132,8 @@ impl Dataset {
             }
         };
 
-        let plot = plot::State::new(dataframe.clone(), state.default_axes());
-
+        let plot = plot::State::new(dataframe.clone(), state.plot_options()).unwrap();
         let (window_id, open) = iced::window::open(iced::window::Settings::default());
-
         (
             Self {
                 path: path.into(),
