@@ -315,26 +315,24 @@ pub mod v2_0 {
                     (path.is_file() && ext == super::VOLTAGE_SPECTROSCOPY_FILE_EXT).then_some(path)
                 })
                 .collect::<Vec<_>>();
-            let readers = files
+            let data = files
                 .into_par_iter()
-                .map(|path| FileReader::new(path.clone()).map_err(|err| err.map_err(Into::into)))
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let data = readers
-                .into_par_iter()
-                .map(|mut reader| {
-                    let data = reader.load_data_all()?;
+                .map(|path| {
+                    let mut reader =
+                        FileReader::new(path.clone()).map_err(|err| err.map_err(Into::into))?;
+                    let data = reader
+                        .load_data_all()
+                        .map_err(|err| err.map_err(Into::into))?;
                     let xy = reader
                         .position()
                         .map_err(|err| crate::dataset::error::Error {
                             paths: vec![reader.path().clone()],
-                            error: err.into(),
+                            error: error::DataFile::Property(err).into(),
                         })?;
 
                     Ok((xy, data))
                 })
-                .collect::<Result<Vec<_>, crate::dataset::error::Error<error::DataFile>>>()
-                .map_err(|err| err.map_err(Into::into))?;
+                .collect::<Result<Vec<_>, _>>()?;
             if data.len() == 0 {
                 return Ok(pl::DataFrame::empty());
             }

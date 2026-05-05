@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rs", "py", "gui", "analysis"]
+members = ["rs", "py"]
 default-members = ["rs"]
 
 [workspace.dependencies]
