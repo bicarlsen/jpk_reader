@@ -181,9 +181,6 @@ pub mod v2_0 {
         }
 
         /// Loads data from all segments and all channels.
-        ///
-        /// # Returns
-        /// `Err((associated file path, error))`
         pub fn load_data_all(
             &mut self,
         ) -> Result<pl::DataFrame, crate::dataset::error::Error<error::DataFile>> {
@@ -287,105 +284,79 @@ pub mod v2_0 {
         }
     }
 
-    /// Read a collection of voltage spectroscopy files (`.jpk-voltage-ramp`) from a directory.
-    #[derive(derive_more::Deref)]
-    pub struct DirReader {
-        path: PathBuf,
-    }
+    pub fn load_files(
+        paths: &Vec<PathBuf>,
+    ) -> Result<pl::DataFrame, crate::dataset::error::Error<error::DataCollection>> {
+        let data = paths
+            .into_par_iter()
+            .map(|path| {
+                let mut reader =
+                    FileReader::new(path.clone()).map_err(|err| err.map_err(Into::into))?;
+                let data = reader
+                    .load_data_all()
+                    .map_err(|err| err.map_err(Into::into))?;
+                let xy = reader
+                    .position()
+                    .map_err(|err| crate::dataset::error::Error {
+                        paths: vec![reader.path().clone()],
+                        error: error::DataFile::Property(err).into(),
+                    })?;
 
-    impl DirReader {
-        pub fn new(path: impl Into<PathBuf>) -> Self {
-            Self { path: path.into() }
+                Ok((xy, data))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if data.len() == 0 {
+            return Ok(pl::DataFrame::empty());
         }
 
-        pub fn load_data_all(
-            &self,
-        ) -> Result<pl::DataFrame, crate::dataset::error::Error<error::DataCollection>> {
-            let dir_walker =
-                fs::read_dir(&self.path).map_err(|err| crate::dataset::error::Error {
-                    paths: vec![self.path.clone()],
-                    error: err.into(),
-                })?;
-            let files = dir_walker
-                .into_iter()
-                .filter_map(|entry| entry.ok())
-                .filter_map(|entry| {
-                    let path = entry.path();
-                    let ext = path.extension()?.to_str()?;
-                    (path.is_file() && ext == super::VOLTAGE_SPECTROSCOPY_FILE_EXT).then_some(path)
-                })
-                .collect::<Vec<_>>();
-            let data = files
-                .into_par_iter()
-                .map(|path| {
-                    let mut reader =
-                        FileReader::new(path.clone()).map_err(|err| err.map_err(Into::into))?;
-                    let data = reader
-                        .load_data_all()
-                        .map_err(|err| err.map_err(Into::into))?;
-                    let xy = reader
-                        .position()
-                        .map_err(|err| crate::dataset::error::Error {
-                            paths: vec![reader.path().clone()],
-                            error: error::DataFile::Property(err).into(),
-                        })?;
+        let (idx, df) = data.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
+        let (xcols, ycols) = idx
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (x, y))| {
+                let length = df[idx].height();
+                let xcol = pl::Column::new_scalar(
+                    "x".into(),
+                    pl::Scalar::new(pl::DataType::Float64, x.into()),
+                    length,
+                );
+                let ycol = pl::Column::new_scalar(
+                    "y".into(),
+                    pl::Scalar::new(pl::DataType::Float64, y.into()),
+                    length,
+                );
+                (xcol, ycol)
+            })
+            .unzip::<_, _, Vec<_>, Vec<_>>();
 
-                    Ok((xy, data))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if data.len() == 0 {
-                return Ok(pl::DataFrame::empty());
-            }
+        let xcol = xcols
+            .into_iter()
+            .reduce(|mut acc, elm| {
+                acc.append_owned(elm).unwrap();
+                acc
+            })
+            .expect("at least one x col should exist");
 
-            let (idx, df) = data.into_iter().unzip::<_, _, Vec<_>, Vec<_>>();
-            let (xcols, ycols) = idx
-                .into_iter()
-                .enumerate()
-                .map(|(idx, (x, y))| {
-                    let length = df[idx].height();
-                    let xcol = pl::Column::new_scalar(
-                        "x".into(),
-                        pl::Scalar::new(pl::DataType::Float64, x.into()),
-                        length,
-                    );
-                    let ycol = pl::Column::new_scalar(
-                        "y".into(),
-                        pl::Scalar::new(pl::DataType::Float64, y.into()),
-                        length,
-                    );
-                    (xcol, ycol)
-                })
-                .unzip::<_, _, Vec<_>, Vec<_>>();
+        let ycol = ycols
+            .into_iter()
+            .reduce(|mut acc, elm| {
+                acc.append_owned(elm).unwrap();
+                acc
+            })
+            .expect("at least one y col should exist");
 
-            let xcol = xcols
-                .into_iter()
-                .reduce(|mut acc, elm| {
-                    acc.append_owned(elm).unwrap();
-                    acc
-                })
-                .expect("at least one x col should exist");
+        let mut df = df
+            .into_iter()
+            .reduce(|mut acc, elm| {
+                acc.vstack_mut_owned(elm).unwrap();
+                acc
+            })
+            .expect("at least one data frame should exist");
 
-            let ycol = ycols
-                .into_iter()
-                .reduce(|mut acc, elm| {
-                    acc.append_owned(elm).unwrap();
-                    acc
-                })
-                .expect("at least one y col should exist");
+        df.with_column(xcol).unwrap();
+        df.with_column(ycol).unwrap();
 
-            let mut df = df
-                .into_iter()
-                .reduce(|mut acc, elm| {
-                    acc.vstack_mut_owned(elm).unwrap();
-                    acc
-                })
-                .expect("at least one data frame should exist");
-
-            df.with_column(xcol).unwrap();
-            df.with_column(ycol).unwrap();
-
-            Ok(df)
-        }
+        Ok(df)
     }
 
     pub mod error {

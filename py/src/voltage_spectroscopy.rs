@@ -4,11 +4,11 @@ use pyo3::prelude::*;
 
 #[pymodule(name = "voltage_spectroscopy")]
 pub mod export {
-    use jpk_reader::voltage_spectroscopy::v2_0 as jpk;
+    use jpk_reader::voltage_spectroscopy::{VOLTAGE_SPECTROSCOPY_FILE_EXT, v2_0 as jpk};
     use polars::prelude as pl;
     use pyo3::{exceptions::PyRuntimeError, prelude::*};
     use pyo3_polars::PyDataFrame;
-    use std::path::PathBuf;
+    use std::{fs, path::PathBuf};
 
     /// Load a single voltage spectroscopy dataset (`.jpk-voltage-ramp`).
     #[pyfunction]
@@ -55,15 +55,19 @@ pub mod export {
     /// Does not recurse into children folders.
     #[pyfunction]
     pub fn load_dir(path: PathBuf) -> PyResult<PyDataFrame> {
-        let reader = jpk::DirReader::new(path);
-        let df = reader
-            .load_data_all()
+        let dir_walker = fs::read_dir(&path).unwrap();
+        let paths = dir_walker
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| {
+                let path = entry.path();
+                let ext = path.extension()?.to_str()?;
+                (path.is_file() && ext == VOLTAGE_SPECTROSCOPY_FILE_EXT).then_some(path)
+            })
+            .collect::<Vec<_>>();
+
+        let df = jpk::load_files(&paths)
             .map_err(|err| PyRuntimeError::new_err(format!("could not load data: {err:?}")))?;
         Ok(PyDataFrame(df))
-    }
-
-    #[pyfunction]
-    pub fn load_glob(pattern: String) -> PyResult<PyDataFrame> {
-        todo!();
     }
 }

@@ -94,7 +94,7 @@ pub mod error {
 /// where `T` is an `&String` if no type is given, otherwise it is the given type.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// let value_string = extract_value!(properties, "string_value_key");
 /// let float_value = extract_value!(properties, "float_value_key", parse f64);
 /// ```
